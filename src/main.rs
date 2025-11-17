@@ -12,10 +12,7 @@ async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
 
-    let app = App {
-        should_exit: false,
-        code: results::mock(),
-    };
+    let app = App::default();
     app.run(terminal).await?;
 
     ratatui::restore();

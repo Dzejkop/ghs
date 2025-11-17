@@ -3,16 +3,33 @@ use std::ops::Range;
 use color_eyre::eyre;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
-use ratatui::widgets::block::Title;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 use ratatui::{DefaultTerminal, prelude::*};
 
-use crate::results::{CodeResults, ItemResult, MatchSegment};
+use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
 
 #[derive(Debug, Clone)]
 pub struct App {
     pub should_exit: bool,
     pub code: CodeResults,
+    pub scrollbar_state: ScrollbarState,
+
+    pub vertical_scroll: usize,
+    pub idx: usize,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            should_exit: false,
+            code: crate::results::mock(),
+            scrollbar_state: Default::default(),
+            vertical_scroll: 0,
+            idx: 0,
+        }
+    }
 }
 
 impl App {
@@ -33,8 +50,17 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
-                // todo
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.idx = (self.idx + 1) % self.code.items.len();
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.idx = self.idx.saturating_sub(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.vertical_scroll = self.vertical_scroll.saturating_add(1);
             }
             _ => {}
         }
@@ -43,18 +69,40 @@ impl App {
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let [header_area, main_area, footer_area] = Layout::vertical([
-            Constraint::Length(2),
+        let [_, main_area, footer_area] = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(1),
         ])
         .areas(area);
 
-        let [list_area, item_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
+        self.scrollbar_state = self.scrollbar_state.content_length(100);
+        self.scrollbar_state = self.scrollbar_state.position(self.vertical_scroll);
+
+        let n = 3;
+        let layout_items = self.iter_text_matches().take(n).map(|(_, text_match)| {
+            Constraint::Length(count_lines(&text_match.fragment) as u16 + 2)
+        });
+
+        let areas = Layout::vertical(layout_items).split(main_area);
+
+        for (idx, (item_result, text_match)) in
+            self.iter_text_matches().take(n).enumerate().take(10)
+        {
+            let area = areas[idx];
+
+            self.render_text_match(text_match, area, buf);
+        }
+
+        // self.render_search_results(self.code.items[self.idx].clone(), main_area, buf);
+
+        // frame.render_stateful_widget(chunks[1], &mut self.vertical_scroll_state);
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"))
+            .render(main_area, buf, &mut self.scrollbar_state);
 
         App::render_footer(footer_area, buf);
-        App::render_search_results(self.code.items[2].clone(), list_area, buf);
     }
 }
 
@@ -65,7 +113,7 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_search_results(item_result: ItemResult, area: Rect, buf: &mut Buffer) {
+    fn render_search_results(&self, item_result: ItemResult, area: Rect, buf: &mut Buffer) {
         let block = Block::new().borders(Borders::ALL).title(
             Span::from(item_result.name).style(
                 Style::default()
@@ -74,7 +122,23 @@ impl App {
             ),
         );
 
-        let text_match = item_result.text_matches[0].clone();
+        let inner_area = block.inner(area);
+        block.render(area, buf);
+
+        let num_matches = item_result.text_matches.len();
+
+        // setup the layout
+        let areas = Layout::vertical(std::iter::repeat_n(Constraint::Length(6), num_matches))
+            .split(inner_area);
+
+        for (idx, text_match) in item_result.text_matches.iter().enumerate() {
+            let area = areas[idx];
+            self.render_text_match(text_match, area, buf);
+        }
+    }
+
+    fn render_text_match(&self, text_match: &TextMatch, area: Rect, buf: &mut Buffer) {
+        let block = Block::new().borders(Borders::ALL);
 
         let mut lines = vec![];
 
@@ -110,7 +174,19 @@ impl App {
             lines.push(vis_line);
         }
 
-        Paragraph::new(lines).clone().block(block).render(area, buf);
+        Paragraph::new(lines)
+            .clone()
+            .block(block)
+            // .scroll((self.vertical_scroll as u16, 0))
+            .render(area, buf);
+    }
+
+    fn iter_text_matches(&self) -> impl Iterator<Item = (&ItemResult, &TextMatch)> {
+        self.code.items.iter().flat_map(|item| {
+            item.text_matches
+                .iter()
+                .map(move |text_match| (item, text_match))
+        })
     }
 }
 
@@ -221,6 +297,10 @@ fn smart_iter_lines(mut s: &str) -> impl Iterator<Item = SmartLineItem<'_>> {
 struct SmartLineItem<'a> {
     pub content: &'a str,
     pub start: usize,
+}
+
+fn count_lines(s: &str) -> usize {
+    smart_iter_lines(s).count()
 }
 
 #[cfg(test)]
