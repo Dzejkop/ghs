@@ -3,6 +3,7 @@ use std::ops::Range;
 use color_eyre::eyre;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
+use ratatui::widgets::block::Title;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{DefaultTerminal, prelude::*};
 
@@ -53,7 +54,7 @@ impl Widget for &mut App {
             Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
 
         App::render_footer(footer_area, buf);
-        App::render_search_results(self.code.items[0].clone(), list_area, buf);
+        App::render_search_results(self.code.items[2].clone(), list_area, buf);
     }
 }
 
@@ -65,7 +66,13 @@ impl App {
     }
 
     fn render_search_results(item_result: ItemResult, area: Rect, buf: &mut Buffer) {
-        let block = Block::new().borders(Borders::ALL).title(item_result.name);
+        let block = Block::new().borders(Borders::ALL).title(
+            Span::from(item_result.name).style(
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
 
         let text_match = item_result.text_matches[0].clone();
 
