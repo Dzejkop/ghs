@@ -1,10 +1,12 @@
+use std::ops::Range;
+
 use color_eyre::eyre;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{DefaultTerminal, prelude::*};
 
-use crate::results::{CodeResults, ItemResult};
+use crate::results::{CodeResults, ItemResult, MatchSegment};
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -69,12 +71,97 @@ impl App {
 
         let mut lines = vec![];
 
-        for line in text_match.fragment.lines() {
-            lines.push(Line::from(line));
+        for line in smart_iter_lines(&text_match.fragment) {
+            let line_start = line.start;
+            let line_end = line_start + line.content.len();
+            let abs_line_range = line_start..line_end;
+
+            let mut curr_idx = 0;
+
+            let mut line = Line::default();
+
+            let find_next_segment_end = |idx: usize| {
+                // we want to get the minimum of either (end of line idx, )
+            };
+
+            // loop {
+            //     let next_segment_end = find_next_segment_end();
+            //     line.push_span(span);
+            // }
+
+            for segment_match in &text_match.matches {
+                let match_range = segment_match.indices.0..segment_match.indices.1;
+
+                // if abs_line_range.contains(match_range) {}
+            }
+
+            // lines.push(Line::from(line.content));
         }
 
         Paragraph::new(lines).clone().block(block).render(area, buf);
     }
+}
+
+/// Takes in a list of segments and returns a fully allocated list of segments
+///
+/// e.g. given 11..20, 32..40 in context 0..100 it should return
+/// 0..11, 11..20, 20..32, 32..40, 40..100
+fn fill_out_segments(context: Range<usize>, segments: &[MatchSegment]) -> Vec<RangeSegment> {
+    let mut items = vec![];
+
+    items
+}
+
+/// Takes in a list of ranges and returns a fully allocated list of ranges
+///
+/// e.g. given 11..20, 32..40 in context 0..100 it should return
+/// 0..11, 11..20, 20..32, 32..40, 40..100
+///
+/// Note the ranges are assumed to be sorted.
+fn fill_out_range_list(
+    context: Range<usize>,
+    segments: impl IntoIterator<Item = Range<usize>>,
+) -> Vec<RangeSegment> {
+    let mut items = vec![];
+
+    let mut current = context.start;
+    for range in segments.into_iter() {
+        if current < range.start {
+            items.push(RangeSegment {
+                range: current..range.start,
+                is_match: false,
+            });
+        }
+
+        let start = range.start.max(current);
+        let end = range.end.min(context.end);
+
+        if end > start {
+            items.push(RangeSegment {
+                range: start..end,
+                is_match: true,
+            });
+        }
+
+        current = end;
+    }
+
+    let end = context.end;
+
+    if current < end {
+        items.push(RangeSegment {
+            range: current..end,
+            is_match: false,
+        });
+    }
+
+    items
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RangeSegment {
+    pub range: Range<usize>,
+    pub is_match: bool,
 }
 
 fn smart_iter_lines(mut s: &str) -> impl Iterator<Item = SmartLineItem<'_>> {
@@ -120,6 +207,7 @@ struct SmartLineItem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     #[test]
     fn smart_lines_basic() {
@@ -190,5 +278,17 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test_case(0..100, vec![25..50] => vec![0..25, 25..50, 50..100] ; "basic")]
+    #[test_case(0..100, vec![25..150] => vec![0..25, 25..100] ; "overflow")]
+    #[test_case(50..100, vec![0..75] => vec![50..75, 75..100] ; "underflow")]
+    #[test_case(0..100, vec![0..100] => vec![0..100] ; "full")]
+    #[test_case(0..100, vec![] => vec![0..100] ; "empty")]
+    #[test_case(0..100, vec![3..11, 32..75] => vec![0..3, 3..11, 11..32, 32..75, 75..100] ; "disjoint")]
+    #[test_case(0..100, vec![3..11, 11..75] => vec![0..3, 3..11, 11..75, 75..100] ; "touching")]
+    fn fill_out_ranges(context: Range<usize>, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+        let segments = fill_out_range_list(context, ranges);
+        segments.into_iter().map(|s| s.range).collect::<Vec<_>>()
     }
 }
