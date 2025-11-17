@@ -76,26 +76,31 @@ impl App {
             let line_end = line_start + line.content.len();
             let abs_line_range = line_start..line_end;
 
-            let mut curr_idx = 0;
+            let segments = fill_out_segments(abs_line_range.clone(), &text_match.matches);
 
-            let mut line = Line::default();
+            let mut vis_line = Line::default();
+            for segment_match in segments {
+                let local_start = segment_match.range.start - line.start;
+                let local_end = segment_match.range.end - line.start;
 
-            let find_next_segment_end = |idx: usize| {
-                // we want to get the minimum of either (end of line idx, )
-            };
+                let local_range = local_start..local_end;
 
-            // loop {
-            //     let next_segment_end = find_next_segment_end();
-            //     line.push_span(span);
-            // }
+                let text = &line.content[local_range];
 
-            for segment_match in &text_match.matches {
-                let match_range = segment_match.indices.0..segment_match.indices.1;
+                let mut span = Span::from(text);
 
-                // if abs_line_range.contains(match_range) {}
+                if segment_match.is_match {
+                    span = span.style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                }
+
+                vis_line.push_span(span);
             }
 
-            // lines.push(Line::from(line.content));
+            lines.push(vis_line);
         }
 
         Paragraph::new(lines).clone().block(block).render(area, buf);
@@ -107,9 +112,8 @@ impl App {
 /// e.g. given 11..20, 32..40 in context 0..100 it should return
 /// 0..11, 11..20, 20..32, 32..40, 40..100
 fn fill_out_segments(context: Range<usize>, segments: &[MatchSegment]) -> Vec<RangeSegment> {
-    let mut items = vec![];
-
-    items
+    let ranges = segments.iter().map(|ms| ms.indices.0..ms.indices.1);
+    fill_out_range_list(context, ranges)
 }
 
 /// Takes in a list of ranges and returns a fully allocated list of ranges
@@ -126,6 +130,10 @@ fn fill_out_range_list(
 
     let mut current = context.start;
     for range in segments.into_iter() {
+        if !are_ranges_overlapping(&context, &range) {
+            continue;
+        }
+
         if current < range.start {
             items.push(RangeSegment {
                 range: current..range.start,
@@ -156,6 +164,10 @@ fn fill_out_range_list(
     }
 
     items
+}
+
+fn are_ranges_overlapping(a: &Range<usize>, b: &Range<usize>) -> bool {
+    b.contains(&a.start) || b.contains(&a.end) || a.contains(&b.start) || a.contains(&b.end)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,6 +294,8 @@ mod tests {
 
     #[test_case(0..100, vec![25..50] => vec![0..25, 25..50, 50..100] ; "basic")]
     #[test_case(0..100, vec![25..150] => vec![0..25, 25..100] ; "overflow")]
+    #[test_case(0..100, vec![200..300] => vec![0..100] ; "disjoint right")]
+    #[test_case(200..300, vec![0..100] => vec![200..300] ; "disjoint left")]
     #[test_case(50..100, vec![0..75] => vec![50..75, 75..100] ; "underflow")]
     #[test_case(0..100, vec![0..100] => vec![0..100] ; "full")]
     #[test_case(0..100, vec![] => vec![0..100] ; "empty")]
@@ -290,5 +304,37 @@ mod tests {
     fn fill_out_ranges(context: Range<usize>, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
         let segments = fill_out_range_list(context, ranges);
         segments.into_iter().map(|s| s.range).collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn fill_out_ranges_annotations() {
+        let context = 0..100;
+        let segments = fill_out_range_list(context, std::iter::once(25..75));
+
+        assert_eq!(
+            segments,
+            vec![
+                RangeSegment {
+                    range: 0..25,
+                    is_match: false,
+                },
+                RangeSegment {
+                    range: 25..75,
+                    is_match: true,
+                },
+                RangeSegment {
+                    range: 75..100,
+                    is_match: false,
+                },
+            ]
+        );
+    }
+
+    #[test_case(0..100, 25..150 => true)]
+    #[test_case(0..100, 25..75 => true)]
+    #[test_case(25..100, 0..50 => true)]
+    #[test_case(0..100, 200..300 => false)]
+    fn range_overlap(a: Range<usize>, b: Range<usize>) -> bool {
+        are_ranges_overlapping(&a, &b)
     }
 }
