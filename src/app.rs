@@ -12,63 +12,89 @@ use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
 
 #[derive(Debug, Clone)]
 pub struct App {
-    pub should_exit: bool,
     pub code: CodeResults,
-    pub scrollbar_state: ScrollbarState,
+}
 
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub should_exit: bool,
+    pub scrollbar_state: ScrollbarState,
     pub vertical_scroll: usize,
-    pub idx: usize,
+    pub selected_item_idx: usize,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
-            should_exit: false,
             code: crate::results::mock(),
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            should_exit: false,
             scrollbar_state: Default::default(),
             vertical_scroll: 0,
-            idx: 0,
+            selected_item_idx: 0,
         }
     }
 }
 
 impl App {
-    pub async fn run(mut self, mut terminal: DefaultTerminal) -> eyre::Result<()> {
-        while !self.should_exit {
-            terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
+    pub async fn run(mut terminal: DefaultTerminal) -> eyre::Result<()> {
+        let mut app = App::default();
+        let mut app_state = AppState::default();
 
-            if let Event::Key(key) = event::read()? {
-                self.handle_key(key);
-            };
+        while !app_state.should_exit {
+            terminal.draw(|frame| {
+                frame.render_stateful_widget(&mut app, frame.area(), &mut app_state)
+            })?;
+
+            let event = event::read()?;
+            match event {
+                Event::Key(key) => app.handle_key(key, &mut app_state),
+                Event::Resize(w, h) => app.handle_resize(w, h),
+                _ => {}
+            }
         }
         Ok(())
     }
 
-    fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) {
         if key.kind != KeyEventKind::Press {
             return;
         }
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.idx = (self.idx + 1) % self.code.items.len();
-            }
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.idx = self.idx.saturating_sub(1);
+            KeyCode::Char('q') | KeyCode::Esc => state.should_exit = true,
+            KeyCode::Char('j') | KeyCode::Down => {
+                state.selected_item_idx = (state.selected_item_idx + 1) % self.code.items.len();
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
+                state.selected_item_idx = state.selected_item_idx.saturating_sub(1);
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.vertical_scroll = self.vertical_scroll.saturating_add(1);
+            KeyCode::Char('l') | KeyCode::Right => {
+                state.vertical_scroll = state.vertical_scroll.saturating_sub(1);
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                state.vertical_scroll = state.vertical_scroll.saturating_add(1);
             }
             _ => {}
         }
     }
+
+    fn handle_resize(&mut self, w: u16, h: u16) {
+        //
+    }
 }
 
-impl Widget for &mut App {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl StatefulWidget for &mut App {
+    type State = AppState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppState) {
+        buf.reset();
+
         let [_, main_area, footer_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Fill(1),
@@ -76,33 +102,39 @@ impl Widget for &mut App {
         ])
         .areas(area);
 
-        self.scrollbar_state = self.scrollbar_state.content_length(100);
-        self.scrollbar_state = self.scrollbar_state.position(self.vertical_scroll);
+        let [sidebar_area, matches_area] =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(4)])
+                .margin(2)
+                .areas(main_area);
 
-        let n = 3;
-        let layout_items = self.iter_text_matches().take(n).map(|(_, text_match)| {
-            Constraint::Length(count_lines(&text_match.fragment) as u16 + 2)
-        });
+        state.scrollbar_state = state.scrollbar_state.content_length(100);
+        state.scrollbar_state = state.scrollbar_state.position(state.vertical_scroll);
 
-        let areas = Layout::vertical(layout_items).split(main_area);
-
-        for (idx, (item_result, text_match)) in
-            self.iter_text_matches().take(n).enumerate().take(10)
-        {
-            let area = areas[idx];
-
-            self.render_text_match(text_match, area, buf);
+        let mut lines = Vec::default();
+        for (idx, item) in self.code.items.iter().enumerate() {
+            let name = format!("{} ({})", item.name, item.repository.full_name);
+            if idx == state.selected_item_idx {
+                lines.push(Line::from(name).reversed());
+            } else {
+                lines.push(Line::from(name));
+            }
         }
+        let paragraph = Paragraph::new(lines);
 
-        // self.render_search_results(self.code.items[self.idx].clone(), main_area, buf);
-
-        // frame.render_stateful_widget(chunks[1], &mut self.vertical_scroll_state);
+        paragraph.render(sidebar_area, buf);
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"))
-            .render(main_area, buf, &mut self.scrollbar_state);
+            .render(sidebar_area, buf, &mut state.scrollbar_state);
 
         App::render_footer(footer_area, buf);
+
+        self.render_search_results(
+            state,
+            &self.code.items[state.selected_item_idx],
+            matches_area,
+            buf,
+        );
     }
 }
 
@@ -113,31 +145,102 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_search_results(&self, item_result: ItemResult, area: Rect, buf: &mut Buffer) {
-        let block = Block::new().borders(Borders::ALL).title(
-            Span::from(item_result.name).style(
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        );
+    fn render_search_results(
+        &self,
+        state: &mut AppState,
+        item_result: &ItemResult,
+        area: Rect,
+        buf: &mut Buffer,
+    ) {
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightRed))
+            .style(Style::default().bg(Color::LightYellow))
+            .title(
+                Span::from(&item_result.name).style(
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            );
 
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let num_matches = item_result.text_matches.len();
+        let mut text_match_heights = vec![];
+        let mut total_height = 0;
 
-        // setup the layout
-        let areas = Layout::vertical(std::iter::repeat_n(Constraint::Length(6), num_matches))
-            .split(inner_area);
-
-        for (idx, text_match) in item_result.text_matches.iter().enumerate() {
-            let area = areas[idx];
-            self.render_text_match(text_match, area, buf);
+        for (_item, text_match) in self.iter_text_matches() {
+            let h = smart_iter_lines(&text_match.fragment).count();
+            text_match_heights.push(h);
+            total_height += h;
+            total_height += 3; // 2 for borders, 1 for margin
         }
+
+        let mut tbuf = Buffer::empty(Rect::new(0, 0, inner_area.width, total_height as u16));
+        let areas = Layout::vertical(
+            text_match_heights
+                .iter()
+                .map(|&h| Constraint::Length(h as u16 + 3)),
+        )
+        .split(*tbuf.area());
+
+        for (idx, (_item, text_match)) in self.iter_text_matches().enumerate() {
+            let area = areas[idx];
+            self.render_text_match(idx, text_match, area, &mut tbuf, state);
+        }
+
+        // adjust the offset based on the selected item idx
+        let calculated_offset_start: usize = text_match_heights
+            .iter()
+            .take(state.selected_item_idx)
+            .copied()
+            .sum();
+        let calculated_offset_end: usize = text_match_heights
+            .iter()
+            .take(state.selected_item_idx + 1)
+            .copied()
+            .sum();
+
+        if calculated_offset_start < state.vertical_scroll {
+            state.vertical_scroll = calculated_offset_start;
+        }
+        let h = inner_area.height as usize;
+        if calculated_offset_end > state.vertical_scroll + h {
+            state.vertical_scroll = calculated_offset_start + h / 2;
+        }
+
+        if state.vertical_scroll != 0 {
+            panic!(
+                "Based on COS={}, COE={}, h={}, state.vertical_scroll is {}",
+                calculated_offset_start, calculated_offset_end, h, state.vertical_scroll
+            );
+        }
+
+        // blit the buffer with scrolling
+        crate::buffers::blit(buf, &tbuf, (0, 0), (0, 0));
+        // for y in inner_area.y..inner_area.height {
+        //     for x in inner_area.x..inner_area.width {
+        //         let tbuf_y = y - inner_area.y + state.vertical_scroll as u16;
+        //         let tbuf_x = x - inner_area.x;
+        //
+        //         let c = tbuf.cell((tbuf_x, tbuf_y)).unwrap();
+        //         let bc = buf.cell_mut((x, y)).unwrap();
+        //
+        //         bc.set_symbol(c.symbol());
+        //         bc.set_style(c.style());
+        //     }
+        // }
     }
 
-    fn render_text_match(&self, text_match: &TextMatch, area: Rect, buf: &mut Buffer) {
+    fn render_text_match(
+        &self,
+        idx: usize,
+        text_match: &TextMatch,
+        area: Rect,
+        buf: &mut Buffer,
+        state: &AppState,
+    ) {
         let block = Block::new().borders(Borders::ALL);
 
         let mut lines = vec![];
@@ -174,10 +277,15 @@ impl App {
             lines.push(vis_line);
         }
 
+        let paragraph_style = if state.selected_item_idx == idx {
+            Style::default().reversed()
+        } else {
+            Style::default()
+        };
+
         Paragraph::new(lines)
-            .clone()
+            .style(paragraph_style)
             .block(block)
-            // .scroll((self.vertical_scroll as u16, 0))
             .render(area, buf);
     }
 

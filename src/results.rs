@@ -14,7 +14,15 @@ pub struct CodeResults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemResult {
     pub name: String,
+    pub path: String,
     pub text_matches: Vec<TextMatch>,
+    pub repository: ItemRepository,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemRepository {
+    pub name: String,
+    pub full_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

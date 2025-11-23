@@ -656,6 +656,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "crossterm 0.29.0",
+ "indoc",
  "octocrab",
  "ratatui",
  "reqwest",

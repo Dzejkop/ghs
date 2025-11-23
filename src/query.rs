@@ -10,6 +10,12 @@ pub struct Query<'a> {
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub span: Range<usize>,
+    pub span_type: SpanType,
+}
+
+#[derive(Debug, Clone)]
+pub enum SpanType {
+    Negative,
 }
 
 #[cfg(test)]
