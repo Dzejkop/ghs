@@ -75,10 +75,10 @@ impl App {
                 state.selected_item_idx = state.selected_item_idx.saturating_sub(1);
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                state.vertical_scroll = state.vertical_scroll.saturating_sub(1);
+                state.vertical_scroll = state.vertical_scroll.saturating_add(1);
             }
             KeyCode::Char('h') | KeyCode::Left => {
-                state.vertical_scroll = state.vertical_scroll.saturating_add(1);
+                state.vertical_scroll = state.vertical_scroll.saturating_sub(1);
             }
             _ => {}
         }
@@ -202,23 +202,19 @@ impl App {
             .copied()
             .sum();
 
-        if calculated_offset_start < state.vertical_scroll {
-            state.vertical_scroll = calculated_offset_start;
-        }
         let h = inner_area.height as usize;
-        if calculated_offset_end > state.vertical_scroll + h {
-            state.vertical_scroll = calculated_offset_start + h / 2;
-        }
+        let current_window_start = state.vertical_scroll;
+        let current_window_end = state.vertical_scroll + h;
 
-        if state.vertical_scroll != 0 {
-            panic!(
-                "Based on COS={}, COE={}, h={}, state.vertical_scroll is {}",
-                calculated_offset_start, calculated_offset_end, h, state.vertical_scroll
-            );
+        if calculated_offset_end > current_window_end {
+            state.vertical_scroll = calculated_offset_end - h;
+        }
+        if calculated_offset_start > current_window_end {
+            state.vertical_scroll = calculated_offset_start;
         }
 
         // blit the buffer with scrolling
-        crate::buffers::blit(buf, &tbuf, (0, 0), (0, 0));
+        crate::buffers::blit(buf, &tbuf, inner_area, (0, state.vertical_scroll as u16));
         // for y in inner_area.y..inner_area.height {
         //     for x in inner_area.x..inner_area.width {
         //         let tbuf_y = y - inner_area.y + state.vertical_scroll as u16;

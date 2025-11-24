@@ -1,24 +1,20 @@
-use ratatui::buffer::Buffer;
+use ratatui::{buffer::Buffer, layout::Rect};
 
-pub fn blit(tgt: &mut Buffer, src: &Buffer, tgt_offset: (u16, u16), src_offset: (u16, u16)) {
+pub fn blit(tgt: &mut Buffer, src: &Buffer, area: Rect, src_offset: (u16, u16)) {
     let (src_offset_x, src_offset_y) = src_offset;
-    let (tgt_offset_x, tgt_offset_y) = tgt_offset;
 
-    let tgt_area = tgt.area;
     let src_area = src.area;
 
     // Iterate over target buffer area
-    for tgt_y in tgt_area.y..(tgt_area.y + tgt_area.height) {
-        for tgt_x in tgt_area.x..(tgt_area.x + tgt_area.width) {
-            println!("({tgt_x}, {tgt_y})");
-
+    for tgt_y in area.y..(area.y + area.height) {
+        for tgt_x in area.x..(area.x + area.width) {
             // Convert target position to relative coordinates
-            let rel_x = tgt_x - tgt_area.x;
-            let rel_y = tgt_y - tgt_area.y;
+            let rel_x = tgt_x - area.x;
+            let rel_y = tgt_y - area.y;
 
-            // Offset target coordinates
-            let tgt_x = tgt_x + tgt_offset_x;
-            let tgt_y = tgt_y + tgt_offset_y;
+            // // Offset target coordinates
+            // let tgt_x = tgt_x + tgt_offset_x;
+            // let tgt_y = tgt_y + tgt_offset_y;
 
             // Calculate source position with offset
             let src_x = src_area.x + rel_x + src_offset_x;
@@ -94,7 +90,7 @@ mod tests {
         let mut tgt_buf = Buffer::empty(Rect::new(0, 0, 5, 5));
         tgt_buf.set_string(4, 4, "x", Style::default());
 
-        blit(&mut tgt_buf, &src_buf, (0, 0), (0, 0));
+        blit(&mut tgt_buf, &src_buf, Rect::new(0, 0, 5, 5), (0, 0));
 
         let disp = display_buffer(&tgt_buf);
 
@@ -109,7 +105,7 @@ mod tests {
         let mut tgt_buf = Buffer::empty(Rect::new(0, 0, 5, 5));
         tgt_buf.set_string(4, 4, "y", Style::default());
 
-        blit(&mut tgt_buf, &src_buf, (1, 1), (0, 0));
+        blit(&mut tgt_buf, &src_buf, Rect::new(1, 1, 2, 2), (0, 0));
 
         let disp = display_buffer(&tgt_buf);
 
@@ -127,7 +123,7 @@ mod tests {
 
         let mut tgt_buf = Buffer::empty(Rect::new(0, 0, 2, 2));
 
-        blit(&mut tgt_buf, &src_buf, (0, 0), (2, 2));
+        blit(&mut tgt_buf, &src_buf, Rect::new(0, 0, 5, 5), (2, 2));
 
         let disp = display_buffer(&tgt_buf);
 
