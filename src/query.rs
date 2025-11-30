@@ -17,8 +17,3 @@ pub struct Segment {
 pub enum SpanType {
     Negative,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-}

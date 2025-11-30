@@ -15,6 +15,7 @@ pub struct CodeResults {
 pub struct ItemResult {
     pub name: String,
     pub path: String,
+    pub html_url: String,
     pub text_matches: Vec<TextMatch>,
     pub repository: ItemRepository,
 }
@@ -23,6 +24,12 @@ pub struct ItemResult {
 pub struct ItemRepository {
     pub name: String,
     pub full_name: String,
+    pub owner: RepositoryOwner,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepositoryOwner {
+    pub login: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +48,7 @@ pub struct MatchSegment {
 mod tests {
     use super::*;
 
+    #[test]
     fn test_parse_resp_json() {
         let resp_json = std::fs::read_to_string("resp.json").unwrap();
 

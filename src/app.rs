@@ -4,9 +4,7 @@ use std::ops::Range;
 use color_eyre::eyre;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
-use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{DefaultTerminal, prelude::*};
 
 use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
@@ -16,10 +14,9 @@ pub struct App {
     pub code: CodeResults,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AppState {
     pub should_exit: bool,
-    pub scrollbar_state: ScrollbarState,
     pub vertical_scroll: usize,
     pub selected_item_idx: usize,
 }
@@ -28,17 +25,6 @@ impl Default for App {
     fn default() -> Self {
         Self {
             code: crate::results::mock(),
-        }
-    }
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            should_exit: false,
-            scrollbar_state: Default::default(),
-            vertical_scroll: 0,
-            selected_item_idx: 0,
         }
     }
 }
@@ -54,9 +40,10 @@ impl App {
             })?;
 
             let event = event::read()?;
+
+            #[allow(clippy::single_match)]
             match event {
                 Event::Key(key) => app.handle_key(key, &mut app_state),
-                Event::Resize(w, h) => app.handle_resize(w, h),
                 _ => {}
             }
         }
@@ -75,18 +62,17 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => {
                 state.selected_item_idx = state.selected_item_idx.saturating_sub(1);
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                state.vertical_scroll = state.vertical_scroll.saturating_add(1);
-            }
-            KeyCode::Char('h') | KeyCode::Left => {
-                state.vertical_scroll = state.vertical_scroll.saturating_sub(1);
+            KeyCode::Char('l') | KeyCode::Enter => {
+                let Some((item, _text_match)) =
+                    self.iter_text_matches().nth(state.selected_item_idx)
+                else {
+                    return;
+                };
+
+                let _ = open::that(&item.html_url);
             }
             _ => {}
         }
-    }
-
-    fn handle_resize(&mut self, w: u16, h: u16) {
-        //
     }
 }
 
@@ -99,16 +85,13 @@ impl StatefulWidget for &mut App {
         let [_prompt_area, main_area, footer_area] = Layout::vertical([
             Constraint::Length(4),
             Constraint::Fill(1),
-            Constraint::Length(1),
+            Constraint::Length(3),
         ])
         .areas(area);
 
         let [matches_area] = Layout::horizontal([Constraint::Fill(4)])
             .margin(2)
             .areas(main_area);
-
-        state.scrollbar_state = state.scrollbar_state.content_length(100);
-        state.scrollbar_state = state.scrollbar_state.position(state.vertical_scroll);
 
         App::render_footer(footer_area, buf);
 
@@ -123,9 +106,12 @@ impl StatefulWidget for &mut App {
 
 impl App {
     fn render_footer(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Use ↓↑ to move, ← to unselect, → to change status, g/G to go top/bottom.")
-            .centered()
-            .render(area, buf);
+        let lines = vec![
+            Line::from("Use ↓↑/jk to navigate, Enter/l to open the search result in the browser"),
+            Line::from("Tab to switch to prompt"),
+        ];
+
+        Paragraph::new(lines).centered().render(area, buf);
     }
 
     fn render_search_results(
@@ -202,8 +188,11 @@ impl App {
         buf: &mut Buffer,
         state: &AppState,
     ) {
+        let repo_name = item_result.repository.full_name.as_str();
+        let file_path = item_result.path.as_str();
+        let block_title = format!(" {repo_name} {file_path} ");
         let block = Block::new().borders(Borders::TOP).title(
-            Span::from(item_result.name.clone()).style(
+            Span::from(block_title).style(
                 Style::default()
                     .fg(Color::LightCyan)
                     .add_modifier(Modifier::BOLD),
@@ -375,10 +364,6 @@ fn smart_iter_lines(mut s: &str) -> impl Iterator<Item = SmartLineItem<'_>> {
 struct SmartLineItem<'a> {
     pub content: &'a str,
     pub start: usize,
-}
-
-fn count_lines(s: &str) -> usize {
-    smart_iter_lines(s).count()
 }
 
 #[cfg(test)]

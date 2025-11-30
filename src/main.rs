@@ -6,7 +6,6 @@ pub mod api;
 pub mod app;
 pub mod buffers;
 pub mod query;
-pub mod result_widget;
 pub mod results;
 
 #[tokio::main]
