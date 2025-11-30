@@ -15,22 +15,22 @@ pub struct App {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusedWidget {
-    TextInput,
+pub enum Screen {
+    SearchPrompt,
     SearchResults,
 }
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub should_exit: bool,
-    pub focused_widget: FocusedWidget,
+    pub current_screen: Screen,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             should_exit: false,
-            focused_widget: FocusedWidget::SearchResults,
+            current_screen: Screen::SearchPrompt,
         }
     }
 }
@@ -70,23 +70,25 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc
-                if !matches!(state.focused_widget, FocusedWidget::TextInput) =>
-            {
-                state.should_exit = true;
-            }
-            KeyCode::Tab => {
-                state.focused_widget = match state.focused_widget {
-                    FocusedWidget::TextInput => FocusedWidget::SearchResults,
-                    FocusedWidget::SearchResults => FocusedWidget::TextInput,
-                };
-            }
-            _ => match state.focused_widget {
-                FocusedWidget::TextInput => {
+
+        match state.current_screen {
+            Screen::SearchPrompt => match key.code {
+                KeyCode::Esc => {
+                    state.should_exit = true;
+                }
+                KeyCode::Enter => {
+                    // TODO: Trigger search and switch to results screen
+                    state.current_screen = Screen::SearchResults;
+                }
+                _ => {
                     self.input_state.handle_key(key);
                 }
-                FocusedWidget::SearchResults => {
+            },
+            Screen::SearchResults => match key.code {
+                KeyCode::Esc => {
+                    state.current_screen = Screen::SearchPrompt;
+                }
+                _ => {
                     let total_items = self.iter_text_matches().count();
                     self.search_results_state
                         .handle_key(key, total_items, &self.code);
@@ -99,42 +101,65 @@ impl App {
 impl StatefulWidget for &mut App {
     type State = AppState;
 
-    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut AppState) {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppState) {
         buf.reset();
 
+        match state.current_screen {
+            Screen::SearchPrompt => {
+                self.render_search_prompt_screen(area, buf);
+            }
+            Screen::SearchResults => {
+                self.render_search_results_screen(area, buf);
+            }
+        }
+    }
+}
+
+impl App {
+    fn render_search_prompt_screen(&mut self, area: Rect, buf: &mut Buffer) {
         let [inner_area] = Layout::horizontal([Constraint::Fill(1)])
             .margin(2)
             .areas(area);
 
-        let [prompt_area, matches_area, footer_area] = Layout::vertical([
+        let [prompt_area, history_area, footer_area] = Layout::vertical([
             Constraint::Length(4),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
         .areas(inner_area);
 
-        TextInput {
-            is_focused: _state.focused_widget == FocusedWidget::TextInput,
-        }
-        .render(prompt_area, buf, &mut self.input_state);
-        App::render_footer(footer_area, buf);
+        TextInput { is_focused: true }.render(prompt_area, buf, &mut self.input_state);
+
+        // TODO: Render search history
+        Paragraph::new("Search history will go here").render(history_area, buf);
+
+        let footer_lines = vec![Line::from("Enter to search, Esc to quit")];
+        Paragraph::new(footer_lines)
+            .centered()
+            .render(footer_area, buf);
+    }
+
+    fn render_search_results_screen(&mut self, area: Rect, buf: &mut Buffer) {
+        let [inner_area] = Layout::horizontal([Constraint::Fill(1)])
+            .margin(2)
+            .areas(area);
+
+        let [matches_area, footer_area] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(inner_area);
 
         SearchResults {
             code: &self.code,
-            is_focused: _state.focused_widget == FocusedWidget::SearchResults,
+            is_focused: true,
         }
         .render(matches_area, buf, &mut self.search_results_state);
-    }
-}
 
-impl App {
-    fn render_footer(area: Rect, buf: &mut Buffer) {
-        let lines = vec![
+        let footer_lines = vec![
             Line::from("Use ↓↑/jk to navigate, Enter/l to open the search result in the browser"),
-            Line::from("Tab to switch to prompt"),
+            Line::from("Esc to go back to search"),
         ];
-
-        Paragraph::new(lines).centered().render(area, buf);
+        Paragraph::new(footer_lines)
+            .centered()
+            .render(footer_area, buf);
     }
 
     fn iter_text_matches(&self) -> impl Iterator<Item = (&ItemResult, &TextMatch)> {
