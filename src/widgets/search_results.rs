@@ -14,6 +14,7 @@ use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
 #[derive(Debug, Clone)]
 pub struct SearchResults<'a> {
     pub code: &'a CodeResults,
+    pub is_focused: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -50,7 +51,15 @@ impl<'a> StatefulWidget for SearchResults<'a> {
     type State = SearchResultsState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let block = Block::new().borders(Borders::ALL);
+        let border_style = if self.is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_style(border_style);
 
         let inner_area = block.inner(area);
         block.render(area, buf);

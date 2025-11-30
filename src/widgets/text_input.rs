@@ -2,11 +2,14 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    style::{Color, Style},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct TextInput {}
+pub struct TextInput {
+    pub is_focused: bool,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TextInputState {
@@ -60,7 +63,16 @@ impl StatefulWidget for TextInput {
     type State = TextInputState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let block = Block::new().borders(Borders::ALL).title("Search");
+        let border_style = if self.is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .title("Search")
+            .border_style(border_style);
         let inner = block.inner(area);
         block.render(area, buf);
 

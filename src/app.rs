@@ -113,14 +113,17 @@ impl StatefulWidget for &mut App {
         ])
         .areas(inner_area);
 
-        TextInput {}.render(prompt_area, buf, &mut self.input_state);
+        TextInput {
+            is_focused: _state.focused_widget == FocusedWidget::TextInput,
+        }
+        .render(prompt_area, buf, &mut self.input_state);
         App::render_footer(footer_area, buf);
 
-        SearchResults { code: &self.code }.render(
-            matches_area,
-            buf,
-            &mut self.search_results_state,
-        );
+        SearchResults {
+            code: &self.code,
+            is_focused: _state.focused_widget == FocusedWidget::SearchResults,
+        }
+        .render(matches_area, buf, &mut self.search_results_state);
     }
 }
 
