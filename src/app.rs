@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Range;
 
 use color_eyre::eyre;
@@ -95,17 +96,16 @@ impl StatefulWidget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppState) {
         buf.reset();
 
-        let [_, main_area, footer_area] = Layout::vertical([
-            Constraint::Length(1),
+        let [_prompt_area, main_area, footer_area] = Layout::vertical([
+            Constraint::Length(4),
             Constraint::Fill(1),
             Constraint::Length(1),
         ])
         .areas(area);
 
-        let [sidebar_area, matches_area] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(4)])
-                .margin(2)
-                .areas(main_area);
+        let [matches_area] = Layout::horizontal([Constraint::Fill(4)])
+            .margin(2)
+            .areas(main_area);
 
         state.scrollbar_state = state.scrollbar_state.content_length(100);
         state.scrollbar_state = state.scrollbar_state.position(state.vertical_scroll);
@@ -121,11 +121,11 @@ impl StatefulWidget for &mut App {
         }
         let paragraph = Paragraph::new(lines);
 
-        paragraph.render(sidebar_area, buf);
-        Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(Some("↑"))
-            .end_symbol(Some("↓"))
-            .render(sidebar_area, buf, &mut state.scrollbar_state);
+        // paragraph.render(sidebar_area, buf);
+        // Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        //     .begin_symbol(Some("↑"))
+        //     .end_symbol(Some("↓"))
+        //     .render(sidebar_area, buf, &mut state.scrollbar_state);
 
         App::render_footer(footer_area, buf);
 
@@ -152,17 +152,7 @@ impl App {
         area: Rect,
         buf: &mut Buffer,
     ) {
-        let block = Block::new()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::LightRed))
-            .style(Style::default().bg(Color::LightYellow))
-            .title(
-                Span::from(&item_result.name).style(
-                    Style::default()
-                        .fg(Color::LightCyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            );
+        let block = Block::new().borders(Borders::ALL);
 
         let inner_area = block.inner(area);
         block.render(area, buf);
@@ -185,65 +175,64 @@ impl App {
         )
         .split(*tbuf.area());
 
-        for (idx, (_item, text_match)) in self.iter_text_matches().enumerate() {
+        for (idx, (item, text_match)) in self.iter_text_matches().enumerate() {
             let area = areas[idx];
-            self.render_text_match(idx, text_match, area, &mut tbuf, state);
+            self.render_text_match(idx, item, text_match, area, &mut tbuf, state);
         }
 
         // adjust the offset based on the selected item idx
+        // Account for the +3 border lines added to each item
         let calculated_offset_start: usize = text_match_heights
             .iter()
             .take(state.selected_item_idx)
-            .copied()
+            .map(|&h| h + 3)
             .sum();
         let calculated_offset_end: usize = text_match_heights
             .iter()
             .take(state.selected_item_idx + 1)
-            .copied()
+            .map(|&h| h + 3)
             .sum();
 
         let h = inner_area.height as usize;
         let current_window_start = state.vertical_scroll;
         let current_window_end = state.vertical_scroll + h;
 
+        // Scroll down if selected item's bottom is below the visible window
         if calculated_offset_end > current_window_end {
             state.vertical_scroll = calculated_offset_end - h;
         }
-        if calculated_offset_start > current_window_end {
+        // Scroll up if selected item's top is above the visible window
+        if calculated_offset_start < current_window_start {
             state.vertical_scroll = calculated_offset_start;
         }
 
         // blit the buffer with scrolling
         crate::buffers::blit(buf, &tbuf, inner_area, (0, state.vertical_scroll as u16));
-        // for y in inner_area.y..inner_area.height {
-        //     for x in inner_area.x..inner_area.width {
-        //         let tbuf_y = y - inner_area.y + state.vertical_scroll as u16;
-        //         let tbuf_x = x - inner_area.x;
-        //
-        //         let c = tbuf.cell((tbuf_x, tbuf_y)).unwrap();
-        //         let bc = buf.cell_mut((x, y)).unwrap();
-        //
-        //         bc.set_symbol(c.symbol());
-        //         bc.set_style(c.style());
-        //     }
-        // }
     }
 
     fn render_text_match(
         &self,
         idx: usize,
+        item_result: &ItemResult,
         text_match: &TextMatch,
         area: Rect,
         buf: &mut Buffer,
         state: &AppState,
     ) {
-        let block = Block::new().borders(Borders::ALL);
+        let block = Block::new().borders(Borders::TOP).title(
+            Span::from(item_result.name.clone()).style(
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
 
         let mut lines = vec![];
 
         for line in smart_iter_lines(&text_match.fragment) {
+            let content = line.content.replace("\t", "    ");
             let line_start = line.start;
-            let line_end = line_start + line.content.len();
+            let line_end = line_start + content.len();
             let abs_line_range = line_start..line_end;
 
             let segments = fill_out_segments(abs_line_range.clone(), &text_match.matches);
@@ -255,7 +244,8 @@ impl App {
 
                 let local_range = local_start..local_end;
 
-                let text = &line.content[local_range];
+                let text = &content[local_range];
+                let text = Cow::Owned(text.to_owned());
 
                 let mut span = Span::from(text);
 
