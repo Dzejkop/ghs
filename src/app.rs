@@ -110,23 +110,6 @@ impl StatefulWidget for &mut App {
         state.scrollbar_state = state.scrollbar_state.content_length(100);
         state.scrollbar_state = state.scrollbar_state.position(state.vertical_scroll);
 
-        let mut lines = Vec::default();
-        for (idx, item) in self.code.items.iter().enumerate() {
-            let name = format!("{} ({})", item.name, item.repository.full_name);
-            if idx == state.selected_item_idx {
-                lines.push(Line::from(name).reversed());
-            } else {
-                lines.push(Line::from(name));
-            }
-        }
-        let paragraph = Paragraph::new(lines);
-
-        // paragraph.render(sidebar_area, buf);
-        // Scrollbar::new(ScrollbarOrientation::VerticalRight)
-        //     .begin_symbol(Some("↑"))
-        //     .end_symbol(Some("↓"))
-        //     .render(sidebar_area, buf, &mut state.scrollbar_state);
-
         App::render_footer(footer_area, buf);
 
         self.render_search_results(
@@ -148,7 +131,7 @@ impl App {
     fn render_search_results(
         &self,
         state: &mut AppState,
-        item_result: &ItemResult,
+        _item_result: &ItemResult,
         area: Rect,
         buf: &mut Buffer,
     ) {
@@ -230,6 +213,7 @@ impl App {
         let mut lines = vec![];
 
         for line in smart_iter_lines(&text_match.fragment) {
+            // Translate tabs to spaces
             let content = line.content.replace("\t", "    ");
             let line_start = line.start;
             let line_end = line_start + content.len();
