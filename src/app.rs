@@ -102,16 +102,16 @@ impl StatefulWidget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer, _state: &mut AppState) {
         buf.reset();
 
-        let [prompt_area, main_area, footer_area] = Layout::vertical([
+        let [inner_area] = Layout::horizontal([Constraint::Fill(1)])
+            .margin(2)
+            .areas(area);
+
+        let [prompt_area, matches_area, footer_area] = Layout::vertical([
             Constraint::Length(4),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
-        .areas(area);
-
-        let [matches_area] = Layout::horizontal([Constraint::Fill(4)])
-            .margin(2)
-            .areas(main_area);
+        .areas(inner_area);
 
         TextInput {}.render(prompt_area, buf, &mut self.input_state);
         App::render_footer(footer_area, buf);
