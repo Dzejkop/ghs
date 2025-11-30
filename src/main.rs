@@ -7,6 +7,7 @@ pub mod app;
 pub mod buffers;
 pub mod query;
 pub mod results;
+pub mod widgets;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
