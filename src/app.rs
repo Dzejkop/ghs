@@ -74,17 +74,33 @@ impl App {
         let mut app = App::new(message_tx);
         let mut app_state = AppState::default();
 
-        while !app_state.should_exit {
+        loop {
+            // Render frame
             terminal.draw(|frame| {
                 frame.render_stateful_widget(&mut app, frame.area(), &mut app_state)
             })?;
 
-            let event = event::read()?;
+            if app_state.should_exit {
+                break;
+            }
 
-            #[allow(clippy::single_match)]
-            match event {
-                Event::Key(key) => app.handle_key(key, &mut app_state),
-                _ => {}
+            // Use tokio::select! to multiplex event sources
+            tokio::select! {
+                // Tick for rendering (60 FPS = ~16ms per frame)
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(16)) => {
+                    // Check for terminal events without blocking
+                    if event::poll(std::time::Duration::ZERO)? {
+                        let event = event::read()?;
+                        match event {
+                            Event::Key(key) => app.handle_key(key, &mut app_state),
+                            _ => {}
+                        }
+                    }
+                }
+                // Handle messages from background tasks
+                Some(msg) = message_rx.recv() => {
+                    app.handle_message(msg, &mut app_state);
+                }
             }
         }
         Ok(())
@@ -118,6 +134,28 @@ impl App {
                         .handle_key(key, total_items, &self.code);
                 }
             },
+        }
+    }
+
+    fn handle_message(&mut self, msg: AppMessage, _state: &mut AppState) {
+        // TODO: Handle messages from background tasks
+        match msg {
+            AppMessage::SearchComplete { results, query } => {
+                // Will be implemented when we add SearchState
+                eprintln!("Search completed for: {}", query);
+            }
+            AppMessage::SearchError { error } => {
+                eprintln!("Search error: {}", error);
+            }
+            AppMessage::PaginationComplete { results, page } => {
+                eprintln!("Pagination completed for page: {}", page);
+            }
+            AppMessage::PaginationError { error } => {
+                eprintln!("Pagination error: {}", error);
+            }
+            AppMessage::HistoryLoaded { searches } => {
+                eprintln!("History loaded: {} searches", searches.len());
+            }
         }
     }
 }
