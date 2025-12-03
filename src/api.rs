@@ -54,6 +54,16 @@ impl PaginationInfo {
             last,
         }
     }
+
+    pub fn get_last_page_number(&self) -> Option<u32> {
+        self.last.as_ref().and_then(|url| {
+            // Parse URL: "...?q=query&page=34"
+            url.split("page=")
+                .nth(1)
+                .and_then(|s| s.split('&').next())
+                .and_then(|s| s.parse::<u32>().ok())
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

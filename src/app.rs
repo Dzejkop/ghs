@@ -1,5 +1,5 @@
 use color_eyre::eyre;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{DefaultTerminal, prelude::*};
@@ -78,6 +78,7 @@ pub enum Screen {
 pub struct AppState {
     pub should_exit: bool,
     pub current_screen: Screen,
+    pub frame_counter: u32,
 }
 
 impl Default for AppState {
@@ -85,6 +86,7 @@ impl Default for AppState {
         Self {
             should_exit: false,
             current_screen: Screen::SearchPrompt,
+            frame_counter: 0,
         }
     }
 }
@@ -125,6 +127,8 @@ impl App {
                 frame.render_stateful_widget(&mut app, frame.area(), &mut app_state)
             })?;
 
+            app_state.frame_counter = app_state.frame_counter.wrapping_add(1);
+
             if app_state.should_exit {
                 break;
             }
@@ -157,64 +161,71 @@ impl App {
         }
 
         match state.current_screen {
-            Screen::SearchPrompt => match key.code {
-                KeyCode::Esc => {
-                    state.should_exit = true;
-                }
-                KeyCode::Down => {
-                    self.search_history.select_next();
-                    // Update input with selected history item
-                    if let Some(query) = self.search_history.get_selected() {
-                        self.input_state.input = query.clone();
-                        self.input_state.cursor_position = query.len();
+            Screen::SearchPrompt => {
+                // Check for Ctrl modifier
+                let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+
+                match (key.code, ctrl_pressed) {
+                    (KeyCode::Esc, _) => {
+                        state.should_exit = true;
                     }
-                }
-                KeyCode::Up => {
-                    self.search_history.select_prev();
-                    // Update input with selected history item
-                    if let Some(query) = self.search_history.get_selected() {
-                        self.input_state.input = query.clone();
-                        self.input_state.cursor_position = query.len();
+                    (KeyCode::Down, _) | (KeyCode::Char('j'), true) => {
+                        self.search_history.select_next();
+                        // Update input with selected history item
+                        if let Some(query) = self.search_history.get_selected() {
+                            self.input_state.input = query.clone();
+                            self.input_state.cursor_position = query.len();
+                        }
                     }
-                }
-                KeyCode::Enter => {
-                    // Spawn async task to fetch search results
-                    let query = self.input_state.input.trim().to_string();
-                    if !query.is_empty() {
-                        let tx = self.message_tx.clone();
-                        let query_for_task = query.clone();
-                        tokio::spawn(async move {
-                            match crate::api::fetch_code_results(&query_for_task, None).await {
-                                Ok(data) => {
-                                    let _ = tx.send(AppMessage::SearchComplete {
-                                        results: data,
-                                        query: query_for_task,
-                                    });
+                    (KeyCode::Up, _) | (KeyCode::Char('k'), true) => {
+                        self.search_history.select_prev();
+                        // Update input with selected history item
+                        if let Some(query) = self.search_history.get_selected() {
+                            self.input_state.input = query.clone();
+                            self.input_state.cursor_position = query.len();
+                        }
+                    }
+                    (KeyCode::Enter, _) | (KeyCode::Char('l'), true) => {
+                        // Spawn async task to fetch search results
+                        let query = self.input_state.input.trim().to_string();
+                        if !query.is_empty() {
+                            let tx = self.message_tx.clone();
+                            let query_for_task = query.clone();
+                            tokio::spawn(async move {
+                                match crate::api::fetch_code_results(&query_for_task, None).await {
+                                    Ok(data) => {
+                                        let _ = tx.send(AppMessage::SearchComplete {
+                                            results: data,
+                                            query: query_for_task,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(AppMessage::SearchError {
+                                            error: e.to_string(),
+                                        });
+                                    }
                                 }
-                                Err(e) => {
-                                    let _ = tx.send(AppMessage::SearchError {
-                                        error: e.to_string(),
-                                    });
-                                }
-                            }
-                        });
+                            });
 
-                        // Update state to Loading
-                        self.search_state = SearchState::Loading { query };
+                            // Update state to Loading
+                            self.search_state = SearchState::Loading { query };
 
-                        // Clear history selection
-                        self.search_history.clear_selection();
+                            // Clear history selection
+                            self.search_history.clear_selection();
 
-                        // Switch to results screen
-                        state.current_screen = Screen::SearchResults;
+                            // Switch to results screen
+                            state.current_screen = Screen::SearchResults;
+                        }
+                    }
+                    _ => {
+                        // Only clear selection and handle input if no Ctrl modifier
+                        if !ctrl_pressed {
+                            self.search_history.clear_selection();
+                            self.input_state.handle_key(key);
+                        }
                     }
                 }
-                _ => {
-                    // Clear history selection when typing
-                    self.search_history.clear_selection();
-                    self.input_state.handle_key(key);
-                }
-            },
+            }
             Screen::SearchResults => match key.code {
                 KeyCode::Esc => {
                     state.current_screen = Screen::SearchPrompt;
@@ -360,7 +371,7 @@ impl StatefulWidget for &mut App {
                 self.render_search_prompt_screen(area, buf);
             }
             Screen::SearchResults => {
-                self.render_search_results_screen(area, buf);
+                self.render_search_results_screen(area, buf, state);
             }
         }
     }
@@ -414,14 +425,14 @@ impl App {
         }
 
         let footer_lines = vec![
-            Line::from("Enter to search, ↓↑ to select history, Esc to quit"),
+            Line::from("Enter/Ctrl+L to search, ↓↑/Ctrl+j/k to select history, Esc to quit"),
         ];
         Paragraph::new(footer_lines)
             .centered()
             .render(footer_area, buf);
     }
 
-    fn render_search_results_screen(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render_search_results_screen(&mut self, area: Rect, buf: &mut Buffer, app_state: &AppState) {
         let [inner_area] = Layout::horizontal([Constraint::Fill(1)])
             .margin(2)
             .areas(area);
@@ -437,7 +448,12 @@ impl App {
                     .render(matches_area, buf);
             }
             SearchState::Loading { query } => {
-                Paragraph::new(format!("Loading results for: {}", query))
+                // Spinner frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+                let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let frame_idx = (app_state.frame_counter / 3) as usize % spinner_frames.len();
+                let spinner = spinner_frames[frame_idx];
+
+                Paragraph::new(format!("{} Loading results for: {}", spinner, query))
                     .centered()
                     .render(matches_area, buf);
             }
@@ -447,19 +463,40 @@ impl App {
                     is_focused: true,
                 }
                 .render(matches_area, buf, &mut self.search_results_state);
-
-                // Show loading more indicator
-                if matches!(self.search_state, SearchState::LoadingMore { .. }) {
-                    // This will be shown at the bottom of results
-                    // For now, just a simple indicator
-                }
             }
         }
 
-        let footer_lines = vec![
-            Line::from("Use ↓↑/jk to navigate, Enter/l to open the search result in the browser"),
-            Line::from("Esc to go back to search"),
+        // Render footer with optional loading indicator and pagination info
+        let page_info = match &self.search_state {
+            SearchState::Loaded { current_page, pagination, .. }
+            | SearchState::LoadingMore { current_page, pagination, .. } => {
+                if let Some(pagination) = pagination {
+                    if let Some(last_page) = pagination.get_last_page_number() {
+                        format!(" | Page {}/{}", current_page, last_page)
+                    } else {
+                        format!(" | Page {}", current_page)
+                    }
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        };
+
+        let mut footer_lines = vec![
+            Line::from(format!("Use ↓↑/jk to navigate, Enter/l to open result{}", page_info)),
         ];
+
+        // Add loading indicator if in LoadingMore state
+        if matches!(self.search_state, SearchState::LoadingMore { .. }) {
+            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame_idx = (app_state.frame_counter / 3) as usize % spinner_frames.len();
+            let spinner = spinner_frames[frame_idx];
+            footer_lines.push(Line::from(format!("{} Loading more results...", spinner)));
+        } else {
+            footer_lines.push(Line::from("Esc to go back to search"));
+        }
+
         Paragraph::new(footer_lines)
             .centered()
             .render(footer_area, buf);
