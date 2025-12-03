@@ -5,6 +5,7 @@ use crate::app::App;
 pub mod api;
 pub mod app;
 pub mod buffers;
+pub mod history;
 pub mod query;
 pub mod results;
 pub mod widgets;
