@@ -10,6 +10,20 @@ use ratatui::{
 };
 
 use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
+use crate::widgets::TextInputState;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterMode {
+    Inactive,
+    Editing,
+    Applied,
+}
+
+impl Default for FilterMode {
+    fn default() -> Self {
+        Self::Inactive
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SearchResults<'a> {
@@ -17,10 +31,23 @@ pub struct SearchResults<'a> {
     pub is_focused: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SearchResultsState {
     pub vertical_scroll: usize,
     pub selected_item_idx: usize,
+    pub filter_mode: FilterMode,
+    pub filter_input_state: TextInputState,
+}
+
+impl Default for SearchResultsState {
+    fn default() -> Self {
+        Self {
+            vertical_scroll: 0,
+            selected_item_idx: 0,
+            filter_mode: FilterMode::default(),
+            filter_input_state: TextInputState::default(),
+        }
+    }
 }
 
 pub enum KeyHandleResult {
@@ -29,18 +56,99 @@ pub enum KeyHandleResult {
 }
 
 impl SearchResultsState {
+    pub fn should_include_match(&self, item: &ItemResult, text_match: &TextMatch) -> bool {
+        // If no filter or empty, include everything
+        if self.filter_mode == FilterMode::Inactive || self.filter_input_state.input.is_empty() {
+            return true;
+        }
+
+        let filter = self.filter_input_state.input.to_lowercase();
+
+        // Match against file path, repo name, or code content
+        item.path.to_lowercase().contains(&filter)
+            || item.repository.full_name.to_lowercase().contains(&filter)
+            || text_match.fragment.to_lowercase().contains(&filter)
+    }
+
     pub fn handle_key(
         &mut self,
         key: KeyEvent,
-        total_items: usize,
+        _total_items: usize,
         code: &CodeResults,
     ) -> KeyHandleResult {
+        // Handle filter mode transitions and input
+        match self.filter_mode {
+            FilterMode::Editing => {
+                match key.code {
+                    KeyCode::Esc => {
+                        // First Esc: exit editing, keep filter applied
+                        self.filter_mode = if self.filter_input_state.input.is_empty() {
+                            FilterMode::Inactive
+                        } else {
+                            FilterMode::Applied
+                        };
+                        return KeyHandleResult::Handled;
+                    }
+                    KeyCode::Enter => {
+                        // Enter also exits editing
+                        self.filter_mode = FilterMode::Applied;
+                        return KeyHandleResult::Handled;
+                    }
+                    _ => {
+                        // Route all other keys to filter input
+                        let old_input = self.filter_input_state.input.clone();
+                        self.filter_input_state.handle_key(key);
+
+                        // Reset selection if filter changed
+                        if old_input != self.filter_input_state.input {
+                            self.selected_item_idx = 0;
+                        }
+
+                        return KeyHandleResult::Handled;
+                    }
+                }
+            }
+            FilterMode::Applied => {
+                match key.code {
+                    KeyCode::Esc => {
+                        // Second Esc: clear filter entirely
+                        self.filter_mode = FilterMode::Inactive;
+                        self.filter_input_state.input.clear();
+                        self.filter_input_state.cursor_position = 0;
+                        self.selected_item_idx = 0;
+                        return KeyHandleResult::Handled;
+                    }
+                    KeyCode::Char('/') => {
+                        // Re-enter editing mode
+                        self.filter_mode = FilterMode::Editing;
+                        return KeyHandleResult::Handled;
+                    }
+                    _ => {} // Fall through to normal navigation
+                }
+            }
+            FilterMode::Inactive => {
+                if key.code == KeyCode::Char('/') {
+                    // Enter filter mode
+                    self.filter_mode = FilterMode::Editing;
+                    return KeyHandleResult::Handled;
+                }
+                // Fall through to normal navigation
+            }
+        }
+
+        // Use filtered count for navigation and pagination
+        let filtered_count = iter_text_matches_filtered(code, self).count();
+
+        if filtered_count == 0 {
+            return KeyHandleResult::Handled;
+        }
+
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
-                self.selected_item_idx = (self.selected_item_idx + 1) % total_items;
+                self.selected_item_idx = (self.selected_item_idx + 1) % filtered_count;
 
                 // Check if we're near the end (within 5 items)
-                if total_items > 0 && self.selected_item_idx >= total_items.saturating_sub(5) {
+                if self.selected_item_idx >= filtered_count.saturating_sub(5) {
                     KeyHandleResult::NeedsPagination
                 } else {
                     KeyHandleResult::Handled
@@ -51,9 +159,8 @@ impl SearchResultsState {
                 KeyHandleResult::Handled
             }
             KeyCode::Char('l') | KeyCode::Enter => {
-                if let Some((item, _text_match)) =
-                    iter_text_matches(code).nth(self.selected_item_idx)
-                {
+                // Find the Nth filtered result
+                if let Some((item, _)) = iter_text_matches_filtered(code, self).nth(self.selected_item_idx) {
                     let _ = open::that(&item.html_url);
                 }
                 KeyHandleResult::Handled
@@ -80,10 +187,13 @@ impl<'a> StatefulWidget for SearchResults<'a> {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
+        // Use filtered iterator
+        let filtered_matches: Vec<_> = iter_text_matches_filtered(self.code, state).collect();
+
         let mut text_match_heights = vec![];
         let mut total_height = 0;
 
-        for (_item, text_match) in iter_text_matches(self.code) {
+        for (_, text_match) in &filtered_matches {
             let h = smart_iter_lines(&text_match.fragment).count();
             text_match_heights.push(h);
             total_height += h;
@@ -98,7 +208,7 @@ impl<'a> StatefulWidget for SearchResults<'a> {
         )
         .split(*tbuf.area());
 
-        for (idx, (item, text_match)) in iter_text_matches(self.code).enumerate() {
+        for (idx, (item, text_match)) in filtered_matches.iter().enumerate() {
             let area = areas[idx];
             render_text_match(idx, item, text_match, area, &mut tbuf, state);
         }
@@ -202,10 +312,14 @@ fn render_text_match(
         .render(area, buf);
 }
 
-fn iter_text_matches(code: &CodeResults) -> impl Iterator<Item = (&ItemResult, &TextMatch)> {
-    code.items.iter().flat_map(|item| {
+fn iter_text_matches_filtered<'a>(
+    code: &'a CodeResults,
+    state: &'a SearchResultsState,
+) -> impl Iterator<Item = (&'a ItemResult, &'a TextMatch)> + 'a {
+    code.items.iter().flat_map(move |item| {
         item.text_matches
             .iter()
+            .filter(move |text_match| state.should_include_match(item, text_match))
             .map(move |text_match| (item, text_match))
     })
 }

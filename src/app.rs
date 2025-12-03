@@ -7,9 +7,9 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::api::{CodeResultsWithPagination, PaginationInfo};
 use crate::history::SearchHistory;
-use crate::results::{CodeResults, ItemResult, TextMatch};
+use crate::results::CodeResults;
 use crate::widgets::{
-    KeyHandleResult, SearchResults, SearchResultsState, TextInput, TextInputState,
+    FilterMode, KeyHandleResult, SearchResults, SearchResultsState, TextInput, TextInputState,
 };
 
 #[derive(Debug, Clone)]
@@ -226,30 +226,50 @@ impl App {
                     }
                 }
             }
-            Screen::SearchResults => match key.code {
-                KeyCode::Esc => {
-                    state.current_screen = Screen::SearchPrompt;
-                }
-                _ => {
-                    // Need to handle results separately to avoid borrow checker issues
-                    let total_items = self.iter_text_matches().count();
-                    let needs_pagination = match &self.search_state {
-                        SearchState::Loaded { results, .. }
-                        | SearchState::LoadingMore { results, .. } => {
-                            let result = self
-                                .search_results_state
-                                .handle_key(key, total_items, results);
-                            matches!(result, KeyHandleResult::NeedsPagination)
+            Screen::SearchResults => {
+                // Handle Esc specially - check filter mode first
+                if key.code == KeyCode::Esc {
+                    match self.search_results_state.filter_mode {
+                        FilterMode::Inactive => {
+                            // No filter active, go back to search prompt
+                            state.current_screen = Screen::SearchPrompt;
+                            return;
                         }
-                        _ => false,
-                    };
-
-                    // Check if pagination is needed
-                    if needs_pagination {
-                        self.try_load_next_page();
+                        _ => {
+                            // Filter is active, let handle_key deal with it
+                        }
                     }
                 }
-            },
+
+                // Need to calculate filtered count
+                let needs_pagination = match &self.search_state {
+                    SearchState::Loaded { results, .. }
+                    | SearchState::LoadingMore { results, .. } => {
+                        // Count filtered results
+                        let filtered_count = results
+                            .items
+                            .iter()
+                            .flat_map(|item| {
+                                item.text_matches
+                                    .iter()
+                                    .filter(|text_match| {
+                                        self.search_results_state.should_include_match(item, text_match)
+                                    })
+                            })
+                            .count();
+
+                        let result = self
+                            .search_results_state
+                            .handle_key(key, filtered_count, results);
+                        matches!(result, KeyHandleResult::NeedsPagination)
+                    }
+                    _ => false,
+                };
+
+                if needs_pagination {
+                    self.try_load_next_page();
+                }
+            }
         }
     }
 
@@ -315,6 +335,11 @@ impl App {
                     pagination: results.pagination,
                     current_page: 1,
                 };
+
+                // Reset filter state for new search
+                self.search_results_state.filter_mode = FilterMode::Inactive;
+                self.search_results_state.filter_input_state.input.clear();
+                self.search_results_state.filter_input_state.cursor_position = 0;
 
                 // Add to search history
                 self.search_history.add_search(query.clone());
@@ -437,8 +462,14 @@ impl App {
             .margin(2)
             .areas(area);
 
+        // Adjust footer height based on filter mode
+        let footer_height = match self.search_results_state.filter_mode {
+            FilterMode::Editing => 5, // Need space for input widget
+            _ => 3,                     // Normal height
+        };
+
         let [matches_area, footer_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(inner_area);
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(footer_height)]).areas(inner_area);
 
         // Render based on search state
         match &self.search_state {
@@ -484,45 +515,55 @@ impl App {
         };
 
         let mut footer_lines = vec![
-            Line::from(format!("Use ↓↑/jk to navigate, Enter/l to open result{}", page_info)),
+            Line::from(format!("Use ↓↑/jk to navigate, Enter/l to open result | / to filter{}", page_info)),
         ];
 
-        // Add loading indicator if in LoadingMore state
-        if matches!(self.search_state, SearchState::LoadingMore { .. }) {
-            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let frame_idx = (app_state.frame_counter / 3) as usize % spinner_frames.len();
-            let spinner = spinner_frames[frame_idx];
-            footer_lines.push(Line::from(format!("{} Loading more results...", spinner)));
-        } else {
-            footer_lines.push(Line::from("Esc to go back to search"));
+        // Handle different filter modes
+        match self.search_results_state.filter_mode {
+            FilterMode::Editing => {
+                // Show editable filter input
+                footer_lines.push(Line::from(""));
+
+                // Split footer_area to make room for input widget
+                let [help_area, input_area] = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                ]).areas(footer_area);
+
+                // Render help text
+                Paragraph::new(footer_lines)
+                    .centered()
+                    .render(help_area, buf);
+
+                // Render filter input widget
+                TextInput { is_focused: true }
+                    .render(input_area, buf, &mut self.search_results_state.filter_input_state);
+
+                return; // Skip normal footer rendering
+            }
+            FilterMode::Applied => {
+                // Show applied filter as read-only
+                footer_lines.push(
+                    Line::from(format!("Filter: {} (Esc to clear)",
+                        self.search_results_state.filter_input_state.input))
+                        .style(Style::default().fg(Color::Yellow))
+                );
+            }
+            FilterMode::Inactive => {
+                // Show normal help text
+                if matches!(self.search_state, SearchState::LoadingMore { .. }) {
+                    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                    let frame_idx = (app_state.frame_counter / 3) as usize % spinner_frames.len();
+                    let spinner = spinner_frames[frame_idx];
+                    footer_lines.push(Line::from(format!("{} Loading more results...", spinner)));
+                } else {
+                    footer_lines.push(Line::from("Esc to go back to search"));
+                }
+            }
         }
 
         Paragraph::new(footer_lines)
             .centered()
             .render(footer_area, buf);
-    }
-
-    fn get_current_results(&self) -> Option<&CodeResults> {
-        match &self.search_state {
-            SearchState::Loaded { results, .. } => Some(results),
-            SearchState::LoadingMore { results, .. } => Some(results),
-            _ => None,
-        }
-    }
-
-    fn iter_text_matches(&self) -> impl Iterator<Item = (&ItemResult, &TextMatch)> {
-        self.get_current_results()
-            .map(|code| {
-                code.items
-                    .iter()
-                    .flat_map(|item| {
-                        item.text_matches
-                            .iter()
-                            .map(move |text_match| (item, text_match))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-            .into_iter()
     }
 }
