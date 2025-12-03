@@ -100,8 +100,22 @@ impl App {
 
     pub async fn run(mut terminal: DefaultTerminal) -> eyre::Result<()> {
         let (message_tx, mut message_rx) = mpsc::unbounded_channel();
-        let mut app = App::new(message_tx);
+        let mut app = App::new(message_tx.clone());
         let mut app_state = AppState::default();
+
+        // Load search history on startup
+        tokio::spawn(async move {
+            match crate::history::load_history().await {
+                Ok(history) => {
+                    let _ = message_tx.send(AppMessage::HistoryLoaded {
+                        searches: history.searches,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to load history: {}", e);
+                }
+            }
+        });
 
         loop {
             // Render frame
@@ -146,8 +160,34 @@ impl App {
                     state.should_exit = true;
                 }
                 KeyCode::Enter => {
-                    // TODO: Trigger search and switch to results screen
-                    state.current_screen = Screen::SearchResults;
+                    // Spawn async task to fetch search results
+                    let query = self.input_state.input.trim().to_string();
+                    if !query.is_empty() {
+                        let tx = self.message_tx.clone();
+                        tokio::spawn(async move {
+                            match crate::api::fetch_code_results(&query, None).await {
+                                Ok(data) => {
+                                    let _ = tx.send(AppMessage::SearchComplete {
+                                        results: data,
+                                        query,
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(AppMessage::SearchError {
+                                        error: e.to_string(),
+                                    });
+                                }
+                            }
+                        });
+
+                        // Update state to Loading
+                        self.search_state = SearchState::Loading {
+                            query: query.clone(),
+                        };
+
+                        // Switch to results screen
+                        state.current_screen = Screen::SearchResults;
+                    }
                 }
                 _ => {
                     self.input_state.handle_key(key);
@@ -169,23 +209,55 @@ impl App {
     }
 
     fn handle_message(&mut self, msg: AppMessage, _state: &mut AppState) {
-        // TODO: Handle messages from background tasks
         match msg {
             AppMessage::SearchComplete { results, query } => {
-                // Will be implemented when we add SearchState
-                eprintln!("Search completed for: {}", query);
+                // Transition to Loaded state
+                self.search_state = SearchState::Loaded {
+                    query: query.clone(),
+                    results: results.results,
+                    pagination: results.pagination,
+                    current_page: 1,
+                };
+
+                // Add to search history
+                self.search_history.add_search(query.clone());
+
+                // Spawn task to save history (fire-and-forget)
+                let history = self.search_history.clone();
+                tokio::spawn(async move {
+                    let _ = crate::history::save_history(&history).await;
+                });
             }
             AppMessage::SearchError { error } => {
-                eprintln!("Search error: {}", error);
+                // Let it crash per requirements
+                panic!("Search error: {}", error);
             }
             AppMessage::PaginationComplete { results, page } => {
-                eprintln!("Pagination completed for page: {}", page);
+                // Merge results and transition back to Loaded
+                if let SearchState::LoadingMore {
+                    query,
+                    results: current_results,
+                    ..
+                } = &mut self.search_state
+                {
+                    // Append new items to existing results
+                    let mut merged = current_results.clone();
+                    merged.items.extend(results.results.items);
+
+                    self.search_state = SearchState::Loaded {
+                        query: query.clone(),
+                        results: merged,
+                        pagination: results.pagination,
+                        current_page: page,
+                    };
+                }
             }
             AppMessage::PaginationError { error } => {
-                eprintln!("Pagination error: {}", error);
+                // Let it crash per requirements
+                panic!("Pagination error: {}", error);
             }
             AppMessage::HistoryLoaded { searches } => {
-                eprintln!("History loaded: {} searches", searches.len());
+                self.search_history = crate::history::SearchHistory::new(searches);
             }
         }
     }
