@@ -23,16 +23,32 @@ pub struct SearchResultsState {
     pub selected_item_idx: usize,
 }
 
+pub enum KeyHandleResult {
+    Handled,
+    NeedsPagination,
+}
+
 impl SearchResultsState {
-    pub fn handle_key(&mut self, key: KeyEvent, total_items: usize, code: &CodeResults) -> bool {
+    pub fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        total_items: usize,
+        code: &CodeResults,
+    ) -> KeyHandleResult {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.selected_item_idx = (self.selected_item_idx + 1) % total_items;
-                true
+
+                // Check if we're near the end (within 5 items)
+                if total_items > 0 && self.selected_item_idx >= total_items.saturating_sub(5) {
+                    KeyHandleResult::NeedsPagination
+                } else {
+                    KeyHandleResult::Handled
+                }
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.selected_item_idx = self.selected_item_idx.saturating_sub(1);
-                true
+                KeyHandleResult::Handled
             }
             KeyCode::Char('l') | KeyCode::Enter => {
                 if let Some((item, _text_match)) =
@@ -40,9 +56,9 @@ impl SearchResultsState {
                 {
                     let _ = open::that(&item.html_url);
                 }
-                true
+                KeyHandleResult::Handled
             }
-            _ => false,
+            _ => KeyHandleResult::Handled,
         }
     }
 }

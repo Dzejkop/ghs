@@ -8,7 +8,9 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use crate::api::{CodeResultsWithPagination, PaginationInfo};
 use crate::history::SearchHistory;
 use crate::results::{CodeResults, ItemResult, TextMatch};
-use crate::widgets::{SearchResults, SearchResultsState, TextInput, TextInputState};
+use crate::widgets::{
+    KeyHandleResult, SearchResults, SearchResultsState, TextInput, TextInputState,
+};
 
 #[derive(Debug, Clone)]
 pub enum SearchState {
@@ -221,11 +223,67 @@ impl App {
                 _ => {
                     if let Some(results) = self.get_current_results() {
                         let total_items = self.iter_text_matches().count();
-                        self.search_results_state
-                            .handle_key(key, total_items, results);
+                        let result = self.search_results_state.handle_key(key, total_items, results);
+
+                        // Check if pagination is needed
+                        if matches!(result, KeyHandleResult::NeedsPagination) {
+                            self.try_load_next_page();
+                        }
                     }
                 }
             },
+        }
+    }
+
+    fn try_load_next_page(&mut self) {
+        // Check if we can load more pages
+        if let SearchState::Loaded {
+            query,
+            pagination: Some(pagination),
+            current_page,
+            ..
+        } = &self.search_state
+        {
+            // Only load if there's a next page
+            if pagination.next.is_some() {
+                let query = query.clone();
+                let next_page = current_page + 1;
+                let tx = self.message_tx.clone();
+
+                // Clone search state data before transitioning
+                if let SearchState::Loaded {
+                    results, pagination, ..
+                } = &self.search_state
+                {
+                    let current_results = results.clone();
+                    let current_pagination = pagination.clone();
+
+                    // Transition to LoadingMore state
+                    self.search_state = SearchState::LoadingMore {
+                        query: query.clone(),
+                        results: current_results,
+                        pagination: current_pagination,
+                        current_page: *current_page,
+                    };
+
+                    // Spawn task to fetch next page
+                    tokio::spawn(async move {
+                        match crate::api::fetch_code_results(&query, Some(next_page)).await {
+                            Ok(data) => {
+                                let _ = tx.send(AppMessage::PaginationComplete {
+                                    results: data,
+                                    page: next_page,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = tx.send(AppMessage::PaginationError {
+                                    error: e.to_string(),
+                                });
+                            }
+                        }
+                    });
+                }
+            }
         }
     }
 
