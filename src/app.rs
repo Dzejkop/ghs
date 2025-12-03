@@ -6,8 +6,35 @@ use ratatui::{DefaultTerminal, prelude::*};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::api::{CodeResultsWithPagination, PaginationInfo};
+use crate::history::SearchHistory;
 use crate::results::{CodeResults, ItemResult, TextMatch};
 use crate::widgets::{SearchResults, SearchResultsState, TextInput, TextInputState};
+
+#[derive(Debug, Clone)]
+pub enum SearchState {
+    Idle,
+    Loading {
+        query: String,
+    },
+    Loaded {
+        query: String,
+        results: CodeResults,
+        pagination: Option<PaginationInfo>,
+        current_page: u32,
+    },
+    LoadingMore {
+        query: String,
+        results: CodeResults,
+        pagination: Option<PaginationInfo>,
+        current_page: u32,
+    },
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        SearchState::Idle
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum AppMessage {
@@ -32,7 +59,8 @@ pub enum AppMessage {
 
 #[derive(Debug, Clone)]
 pub struct App {
-    pub code: CodeResults,
+    pub search_state: SearchState,
+    pub search_history: SearchHistory,
     pub input_state: TextInputState,
     pub search_results_state: SearchResultsState,
     pub message_tx: UnboundedSender<AppMessage>,
@@ -62,7 +90,8 @@ impl Default for AppState {
 impl App {
     fn new(message_tx: UnboundedSender<AppMessage>) -> Self {
         Self {
-            code: crate::results::mock(),
+            search_state: SearchState::default(),
+            search_history: SearchHistory::default(),
             input_state: TextInputState::default(),
             search_results_state: SearchResultsState::default(),
             message_tx,
@@ -129,9 +158,11 @@ impl App {
                     state.current_screen = Screen::SearchPrompt;
                 }
                 _ => {
-                    let total_items = self.iter_text_matches().count();
-                    self.search_results_state
-                        .handle_key(key, total_items, &self.code);
+                    if let Some(results) = self.get_current_results() {
+                        let total_items = self.iter_text_matches().count();
+                        self.search_results_state
+                            .handle_key(key, total_items, results);
+                    }
                 }
             },
         }
@@ -209,11 +240,32 @@ impl App {
         let [matches_area, footer_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(inner_area);
 
-        SearchResults {
-            code: &self.code,
-            is_focused: true,
+        // Render based on search state
+        match &self.search_state {
+            SearchState::Idle => {
+                Paragraph::new("No search results yet. Press Esc to go back.")
+                    .centered()
+                    .render(matches_area, buf);
+            }
+            SearchState::Loading { query } => {
+                Paragraph::new(format!("Loading results for: {}", query))
+                    .centered()
+                    .render(matches_area, buf);
+            }
+            SearchState::Loaded { results, .. } | SearchState::LoadingMore { results, .. } => {
+                SearchResults {
+                    code: results,
+                    is_focused: true,
+                }
+                .render(matches_area, buf, &mut self.search_results_state);
+
+                // Show loading more indicator
+                if matches!(self.search_state, SearchState::LoadingMore { .. }) {
+                    // This will be shown at the bottom of results
+                    // For now, just a simple indicator
+                }
+            }
         }
-        .render(matches_area, buf, &mut self.search_results_state);
 
         let footer_lines = vec![
             Line::from("Use ↓↑/jk to navigate, Enter/l to open the search result in the browser"),
@@ -224,11 +276,27 @@ impl App {
             .render(footer_area, buf);
     }
 
+    fn get_current_results(&self) -> Option<&CodeResults> {
+        match &self.search_state {
+            SearchState::Loaded { results, .. } => Some(results),
+            SearchState::LoadingMore { results, .. } => Some(results),
+            _ => None,
+        }
+    }
+
     fn iter_text_matches(&self) -> impl Iterator<Item = (&ItemResult, &TextMatch)> {
-        self.code.items.iter().flat_map(|item| {
-            item.text_matches
-                .iter()
-                .map(move |text_match| (item, text_match))
-        })
+        self.get_current_results()
+            .map(|code| {
+                code.items
+                    .iter()
+                    .flat_map(|item| {
+                        item.text_matches
+                            .iter()
+                            .map(move |text_match| (item, text_match))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+            .into_iter()
     }
 }
