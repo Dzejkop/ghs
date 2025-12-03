@@ -56,6 +56,7 @@ impl PaginationInfo {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct CodeResultsWithPagination {
     pub results: CodeResults,
     pub pagination: Option<PaginationInfo>,

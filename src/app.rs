@@ -1,7 +1,7 @@
 use color_eyre::eyre;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{DefaultTerminal, prelude::*};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
@@ -182,12 +182,13 @@ impl App {
                     let query = self.input_state.input.trim().to_string();
                     if !query.is_empty() {
                         let tx = self.message_tx.clone();
+                        let query_for_task = query.clone();
                         tokio::spawn(async move {
-                            match crate::api::fetch_code_results(&query, None).await {
+                            match crate::api::fetch_code_results(&query_for_task, None).await {
                                 Ok(data) => {
                                     let _ = tx.send(AppMessage::SearchComplete {
                                         results: data,
-                                        query,
+                                        query: query_for_task,
                                     });
                                 }
                                 Err(e) => {
@@ -199,9 +200,7 @@ impl App {
                         });
 
                         // Update state to Loading
-                        self.search_state = SearchState::Loading {
-                            query: query.clone(),
-                        };
+                        self.search_state = SearchState::Loading { query };
 
                         // Clear history selection
                         self.search_history.clear_selection();
@@ -221,14 +220,22 @@ impl App {
                     state.current_screen = Screen::SearchPrompt;
                 }
                 _ => {
-                    if let Some(results) = self.get_current_results() {
-                        let total_items = self.iter_text_matches().count();
-                        let result = self.search_results_state.handle_key(key, total_items, results);
-
-                        // Check if pagination is needed
-                        if matches!(result, KeyHandleResult::NeedsPagination) {
-                            self.try_load_next_page();
+                    // Need to handle results separately to avoid borrow checker issues
+                    let total_items = self.iter_text_matches().count();
+                    let needs_pagination = match &self.search_state {
+                        SearchState::Loaded { results, .. }
+                        | SearchState::LoadingMore { results, .. } => {
+                            let result = self
+                                .search_results_state
+                                .handle_key(key, total_items, results);
+                            matches!(result, KeyHandleResult::NeedsPagination)
                         }
+                        _ => false,
+                    };
+
+                    // Check if pagination is needed
+                    if needs_pagination {
+                        self.try_load_next_page();
                     }
                 }
             },

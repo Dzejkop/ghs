@@ -1,5 +1,4 @@
 use color_eyre::eyre;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
 
