@@ -3,15 +3,39 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
 use ratatui::widgets::Paragraph;
 use ratatui::{DefaultTerminal, prelude::*};
+use tokio::sync::mpsc::{self, UnboundedSender};
 
+use crate::api::{CodeResultsWithPagination, PaginationInfo};
 use crate::results::{CodeResults, ItemResult, TextMatch};
 use crate::widgets::{SearchResults, SearchResultsState, TextInput, TextInputState};
+
+#[derive(Debug, Clone)]
+pub enum AppMessage {
+    SearchComplete {
+        results: CodeResultsWithPagination,
+        query: String,
+    },
+    SearchError {
+        error: String,
+    },
+    PaginationComplete {
+        results: CodeResultsWithPagination,
+        page: u32,
+    },
+    PaginationError {
+        error: String,
+    },
+    HistoryLoaded {
+        searches: Vec<String>,
+    },
+}
 
 #[derive(Debug, Clone)]
 pub struct App {
     pub code: CodeResults,
     pub input_state: TextInputState,
     pub search_results_state: SearchResultsState,
+    pub message_tx: UnboundedSender<AppMessage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,19 +59,19 @@ impl Default for AppState {
     }
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    fn new(message_tx: UnboundedSender<AppMessage>) -> Self {
         Self {
             code: crate::results::mock(),
             input_state: TextInputState::default(),
             search_results_state: SearchResultsState::default(),
+            message_tx,
         }
     }
-}
 
-impl App {
     pub async fn run(mut terminal: DefaultTerminal) -> eyre::Result<()> {
-        let mut app = App::default();
+        let (message_tx, mut message_rx) = mpsc::unbounded_channel();
+        let mut app = App::new(message_tx);
         let mut app_state = AppState::default();
 
         while !app_state.should_exit {
