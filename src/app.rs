@@ -159,6 +159,22 @@ impl App {
                 KeyCode::Esc => {
                     state.should_exit = true;
                 }
+                KeyCode::Down => {
+                    self.search_history.select_next();
+                    // Update input with selected history item
+                    if let Some(query) = self.search_history.get_selected() {
+                        self.input_state.input = query.clone();
+                        self.input_state.cursor_position = query.len();
+                    }
+                }
+                KeyCode::Up => {
+                    self.search_history.select_prev();
+                    // Update input with selected history item
+                    if let Some(query) = self.search_history.get_selected() {
+                        self.input_state.input = query.clone();
+                        self.input_state.cursor_position = query.len();
+                    }
+                }
                 KeyCode::Enter => {
                     // Spawn async task to fetch search results
                     let query = self.input_state.input.trim().to_string();
@@ -185,11 +201,16 @@ impl App {
                             query: query.clone(),
                         };
 
+                        // Clear history selection
+                        self.search_history.clear_selection();
+
                         // Switch to results screen
                         state.current_screen = Screen::SearchResults;
                     }
                 }
                 _ => {
+                    // Clear history selection when typing
+                    self.search_history.clear_selection();
                     self.input_state.handle_key(key);
                 }
             },
@@ -295,10 +316,41 @@ impl App {
 
         TextInput { is_focused: true }.render(prompt_area, buf, &mut self.input_state);
 
-        // TODO: Render search history
-        Paragraph::new("Search history will go here").render(history_area, buf);
+        // Render search history
+        let history_block = Block::new()
+            .borders(Borders::ALL)
+            .title("Search History");
+        let history_inner = history_block.inner(history_area);
+        history_block.render(history_area, buf);
 
-        let footer_lines = vec![Line::from("Enter to search, Esc to quit")];
+        if self.search_history.searches.is_empty() {
+            Paragraph::new("No search history yet")
+                .style(Style::default().fg(Color::DarkGray))
+                .render(history_inner, buf);
+        } else {
+            let history_lines: Vec<Line> = self
+                .search_history
+                .searches
+                .iter()
+                .enumerate()
+                .map(|(idx, search)| {
+                    let style = if self.search_history.selected_idx == Some(idx) {
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    Line::from(search.as_str()).style(style)
+                })
+                .collect();
+
+            Paragraph::new(history_lines).render(history_inner, buf);
+        }
+
+        let footer_lines = vec![
+            Line::from("Enter to search, ↓↑ to select history, Esc to quit"),
+        ];
         Paragraph::new(footer_lines)
             .centered()
             .render(footer_area, buf);
