@@ -160,7 +160,9 @@ impl SearchResultsState {
             }
             KeyCode::Char('l') | KeyCode::Enter => {
                 // Find the Nth filtered result
-                if let Some((item, _)) = iter_text_matches_filtered(code, self).nth(self.selected_item_idx) {
+                if let Some((item, _)) =
+                    iter_text_matches_filtered(code, self).nth(self.selected_item_idx)
+                {
                     let _ = open::that(&item.html_url);
                 }
                 KeyHandleResult::Handled

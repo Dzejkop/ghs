@@ -54,8 +54,7 @@ impl SearchHistory {
     }
 
     pub fn get_selected(&self) -> Option<&String> {
-        self.selected_idx
-            .and_then(|idx| self.searches.get(idx))
+        self.selected_idx.and_then(|idx| self.searches.get(idx))
     }
 
     pub fn clear_selection(&mut self) {
@@ -64,8 +63,8 @@ impl SearchHistory {
 }
 
 fn get_history_path() -> eyre::Result<PathBuf> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| eyre::eyre!("Could not find config directory"))?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| eyre::eyre!("Could not find config directory"))?;
 
     let ghs_dir = config_dir.join("ghs");
     Ok(ghs_dir.join("history.json"))

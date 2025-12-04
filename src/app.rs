@@ -12,8 +12,9 @@ use crate::widgets::{
     FilterMode, KeyHandleResult, SearchResults, SearchResultsState, TextInput, TextInputState,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum SearchState {
+    #[default]
     Idle,
     Loading {
         query: String,
@@ -30,12 +31,6 @@ pub enum SearchState {
         pagination: Option<PaginationInfo>,
         current_page: u32,
     },
-}
-
-impl Default for SearchState {
-    fn default() -> Self {
-        SearchState::Idle
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -250,17 +245,16 @@ impl App {
                             .items
                             .iter()
                             .flat_map(|item| {
-                                item.text_matches
-                                    .iter()
-                                    .filter(|text_match| {
-                                        self.search_results_state.should_include_match(item, text_match)
-                                    })
+                                item.text_matches.iter().filter(|text_match| {
+                                    self.search_results_state
+                                        .should_include_match(item, text_match)
+                                })
                             })
                             .count();
 
-                        let result = self
-                            .search_results_state
-                            .handle_key(key, filtered_count, results);
+                        let result =
+                            self.search_results_state
+                                .handle_key(key, filtered_count, results);
                         matches!(result, KeyHandleResult::NeedsPagination)
                     }
                     _ => false,
@@ -290,7 +284,9 @@ impl App {
 
                 // Clone search state data before transitioning
                 if let SearchState::Loaded {
-                    results, pagination, ..
+                    results,
+                    pagination,
+                    ..
                 } = &self.search_state
                 {
                     let current_results = results.clone();
@@ -418,9 +414,7 @@ impl App {
         TextInput { is_focused: true }.render(prompt_area, buf, &mut self.input_state);
 
         // Render search history
-        let history_block = Block::new()
-            .borders(Borders::ALL)
-            .title("Search History");
+        let history_block = Block::new().borders(Borders::ALL).title("Search History");
         let history_inner = history_block.inner(history_area);
         history_block.render(history_area, buf);
 
@@ -449,9 +443,9 @@ impl App {
             Paragraph::new(history_lines).render(history_inner, buf);
         }
 
-        let footer_lines = vec![
-            Line::from("Enter/Ctrl+L to search, ↓↑/Ctrl+j/k to select history, Esc to quit"),
-        ];
+        let footer_lines = vec![Line::from(
+            "Enter/Ctrl+L to search, ↓↑/Ctrl+j/k to select history, Esc to quit",
+        )];
         Paragraph::new(footer_lines)
             .centered()
             .render(footer_area, buf);
@@ -465,11 +459,12 @@ impl App {
         // Adjust footer height based on filter mode
         let footer_height = match self.search_results_state.filter_mode {
             FilterMode::Editing => 5, // Need space for input widget
-            _ => 3,                     // Normal height
+            _ => 3,                   // Normal height
         };
 
         let [matches_area, footer_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(footer_height)]).areas(inner_area);
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(footer_height)])
+                .areas(inner_area);
 
         // Render based on search state
         match &self.search_state {
@@ -499,8 +494,16 @@ impl App {
 
         // Render footer with optional loading indicator and pagination info
         let page_info = match &self.search_state {
-            SearchState::Loaded { current_page, pagination, .. }
-            | SearchState::LoadingMore { current_page, pagination, .. } => {
+            SearchState::Loaded {
+                current_page,
+                pagination,
+                ..
+            }
+            | SearchState::LoadingMore {
+                current_page,
+                pagination,
+                ..
+            } => {
                 if let Some(pagination) = pagination {
                     if let Some(last_page) = pagination.get_last_page_number() {
                         format!(" | Page {}/{}", current_page, last_page)
@@ -514,9 +517,10 @@ impl App {
             _ => String::new(),
         };
 
-        let mut footer_lines = vec![
-            Line::from(format!("Use ↓↑/jk to navigate, Enter/l to open result | / to filter{}", page_info)),
-        ];
+        let mut footer_lines = vec![Line::from(format!(
+            "Use ↓↑/jk to navigate, Enter/l to open result | / to filter{}",
+            page_info
+        ))];
 
         // Handle different filter modes
         match self.search_results_state.filter_mode {
@@ -525,10 +529,9 @@ impl App {
                 footer_lines.push(Line::from(""));
 
                 // Split footer_area to make room for input widget
-                let [help_area, input_area] = Layout::vertical([
-                    Constraint::Length(2),
-                    Constraint::Length(3),
-                ]).areas(footer_area);
+                let [help_area, input_area] =
+                    Layout::vertical([Constraint::Length(2), Constraint::Length(3)])
+                        .areas(footer_area);
 
                 // Render help text
                 Paragraph::new(footer_lines)
@@ -536,17 +539,22 @@ impl App {
                     .render(help_area, buf);
 
                 // Render filter input widget
-                TextInput { is_focused: true }
-                    .render(input_area, buf, &mut self.search_results_state.filter_input_state);
+                TextInput { is_focused: true }.render(
+                    input_area,
+                    buf,
+                    &mut self.search_results_state.filter_input_state,
+                );
 
                 return; // Skip normal footer rendering
             }
             FilterMode::Applied => {
                 // Show applied filter as read-only
                 footer_lines.push(
-                    Line::from(format!("Filter: {} (Esc to clear)",
-                        self.search_results_state.filter_input_state.input))
-                        .style(Style::default().fg(Color::Yellow))
+                    Line::from(format!(
+                        "Filter: {} (Esc to clear)",
+                        self.search_results_state.filter_input_state.input
+                    ))
+                    .style(Style::default().fg(Color::Yellow)),
                 );
             }
             FilterMode::Inactive => {
