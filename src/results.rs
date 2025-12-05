@@ -11,6 +11,12 @@ pub struct CodeResults {
     pub items: Vec<ItemResult>,
 }
 
+impl CodeResults {
+    pub fn count(&self) -> usize {
+        self.items.iter().map(|ir| ir.text_matches.len()).sum()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemResult {
     pub name: String,

@@ -270,6 +270,8 @@ fn render_text_match(
     for line in smart_iter_lines(&text_match.fragment) {
         // Translate tabs to spaces
         let content = line.content.replace("\t", "    ");
+        // Replace carriage returns
+        let content = content.replace("\r", "");
         let line_start = line.start;
         let line_end = line_start + content.len();
         let abs_line_range = line_start..line_end;
