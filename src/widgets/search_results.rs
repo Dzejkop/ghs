@@ -31,23 +31,12 @@ pub struct SearchResults<'a> {
     pub is_focused: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct SearchResultsState {
     pub vertical_scroll: usize,
     pub selected_item_idx: usize,
     pub filter_mode: FilterMode,
     pub filter_input_state: TextInputState,
-}
-
-impl Default for SearchResultsState {
-    fn default() -> Self {
-        Self {
-            vertical_scroll: 0,
-            selected_item_idx: 0,
-            filter_mode: FilterMode::default(),
-            filter_input_state: TextInputState::default(),
-        }
-    }
 }
 
 pub enum KeyHandleResult {

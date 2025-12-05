@@ -151,9 +151,8 @@ impl App {
                     // Check for terminal events without blocking
                     if event::poll(std::time::Duration::ZERO)? {
                         let event = event::read()?;
-                        match event {
-                            Event::Key(key) => app.handle_key(key, &mut app_state),
-                            _ => {}
+                        if let Event::Key(key) = event {
+                            app.handle_key(key, &mut app_state);
                         }
                     }
                 }
