@@ -5,9 +5,26 @@ use crate::results::CodeResults;
 
 const GITHUB_BASE_URI: &str = "https://api.github.com";
 
-fn read_env_var(var_name: &str) -> String {
-    let err = format!("Missing environment variable: {var_name}");
-    std::env::var(var_name).expect(&err)
+fn get_github_token() -> eyre::Result<String> {
+    // First try environment variable
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        return Ok(token);
+    }
+
+    // Fall back to gh CLI
+    let output = std::process::Command::new("gh")
+        .arg("auth")
+        .arg("token")
+        .output()?;
+
+    if output.status.success() {
+        let token = String::from_utf8(output.stdout)?.trim().to_string();
+        Ok(token)
+    } else {
+        eyre::bail!(
+            "GITHUB_TOKEN not set and 'gh auth token' failed. Please set GITHUB_TOKEN or authenticate with 'gh auth login'"
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,9 +105,7 @@ pub async fn fetch_code_results(
     let mut req = Request::new(Method::GET, url);
     req.headers_mut().insert(
         "Authorization",
-        format!("Bearer {}", read_env_var("GITHUB_TOKEN"))
-            .parse()
-            .unwrap(),
+        format!("Bearer {}", get_github_token()?).parse().unwrap(),
     );
     req.headers_mut().insert(
         "Accept",
