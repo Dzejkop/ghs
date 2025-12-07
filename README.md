@@ -2,7 +2,7 @@
 
 A terminal UI for searching GitHub.
 
-![Demo](demo.gif)
+[![asciicast](https://asciinema.org/a/760548.svg)](https://asciinema.org/a/760548)
 
 ## Installation
 
