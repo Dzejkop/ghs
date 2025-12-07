@@ -19,9 +19,6 @@ struct Args {
     /// Path to the log file
     #[arg(long, default_value = ".ghs.log", env = "GHS_LOG")]
     log_file: Option<std::path::PathBuf>,
-
-    /// A query to execute
-    query: Option<String>,
 }
 
 #[tokio::main]
