@@ -17,3 +17,14 @@ pub struct Segment {
 pub enum SpanType {
     Negative,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+
+    #[test]
+    fn basic() {
+        let q = "org:rust-lang function";
+    }
+}

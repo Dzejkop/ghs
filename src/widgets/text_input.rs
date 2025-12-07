@@ -73,6 +73,7 @@ impl StatefulWidget for TextInput {
             .borders(Borders::ALL)
             .title("Search")
             .border_style(border_style);
+
         let inner = block.inner(area);
         block.render(area, buf);
 

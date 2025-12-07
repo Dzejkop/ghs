@@ -151,6 +151,7 @@ impl App {
                     // Check for terminal events without blocking
                     if event::poll(std::time::Duration::ZERO)? {
                         let event = event::read()?;
+                        tracing::debug!("Event received: {:?}", event);
                         if let Event::Key(key) = event {
                             app.handle_key(key, &mut app_state);
                         }
@@ -176,7 +177,7 @@ impl App {
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
 
                 match (key.code, ctrl_pressed) {
-                    (KeyCode::Esc, _) => {
+                    (KeyCode::Esc, _) | (KeyCode::Char('c'), true) => {
                         state.should_exit = true;
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('j'), true) => {
@@ -420,9 +421,9 @@ impl App {
             .areas(area);
 
         let [prompt_area, history_area, footer_area] = Layout::vertical([
-            Constraint::Length(4),
-            Constraint::Fill(1),
             Constraint::Length(3),
+            Constraint::Fill(1),
+            Constraint::Length(1),
         ])
         .areas(inner_area);
 
@@ -459,7 +460,7 @@ impl App {
         }
 
         let footer_lines = vec![Line::from(
-            "Enter/Ctrl+L to search, ↓↑/Ctrl+j/k to select history, Esc to quit",
+            "Enter/Ctrl+L to search, ↓↑ to select history, Esc to quit",
         )];
         Paragraph::new(footer_lines)
             .centered()
