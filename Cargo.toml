@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 readme = "README.md"
+description = "A terminal UI for GitHub code search"
+repository = "https://github.com/dzejkop/ghs"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["env", "derive"] }
