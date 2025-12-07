@@ -12,17 +12,12 @@ use ratatui::{
 use crate::results::{CodeResults, ItemResult, MatchSegment, TextMatch};
 use crate::widgets::TextInputState;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum FilterMode {
+    #[default]
     Inactive,
     Editing,
     Applied,
-}
-
-impl Default for FilterMode {
-    fn default() -> Self {
-        Self::Inactive
-    }
 }
 
 #[derive(Debug, Clone)]

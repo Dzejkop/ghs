@@ -28,7 +28,7 @@ async fn main() -> eyre::Result<()> {
 
     let args = Args::parse();
 
-    let guard;
+    let _guard;
     if let Some(log_path) = args.log_file {
         let log_dir = log_path
             .parent()
@@ -42,7 +42,7 @@ async fn main() -> eyre::Result<()> {
 
         let file_appender = tracing_appender::rolling::never(log_dir, log_file_name);
         let (non_blocking, new_guard) = tracing_appender::non_blocking(file_appender);
-        guard = new_guard;
+        _guard = new_guard;
 
         tracing_subscriber::registry()
             .with(
