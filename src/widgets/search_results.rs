@@ -99,7 +99,7 @@ impl SearchResultsState {
             }
             FilterMode::Applied => {
                 match key.code {
-                    KeyCode::Esc => {
+                    KeyCode::Char('q') | KeyCode::Esc => {
                         // Second Esc: clear filter entirely
                         self.filter_mode = FilterMode::Inactive;
                         self.filter_input_state.input.clear();
@@ -171,8 +171,17 @@ impl<'a> StatefulWidget for SearchResults<'a> {
             Style::default()
         };
 
+        // TODO: Move pagination info here
+        let paging = format!(
+            "{idx}/{count}",
+            idx = state.selected_item_idx,
+            count = self.code.count()
+        );
+
         let block = Block::new()
             .borders(Borders::ALL)
+            .title_bottom(paging)
+            .title_alignment(Alignment::Right)
             .border_style(border_style);
 
         let inner_area = block.inner(area);

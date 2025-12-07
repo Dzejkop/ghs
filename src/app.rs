@@ -508,12 +508,6 @@ impl App {
             }
         }
 
-        let result_info = format!(
-            "[{}/{}]",
-            self.search_results_state.selected_item_idx,
-            self.search_state.num_results()
-        );
-
         // Render footer with optional loading indicator and pagination info
         let page_info = match &self.search_state {
             SearchState::Loaded {
@@ -540,7 +534,7 @@ impl App {
         };
 
         let mut footer_lines = vec![Line::from(format!(
-            "Use ↓↑/jk to navigate, Enter/l to open result | / to filter | {result_info}{page_info}",
+            "Use ↓↑/jk to navigate, Enter/l to open result | / to filter{page_info}",
         ))];
 
         // Handle different filter modes

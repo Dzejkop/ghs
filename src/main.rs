@@ -23,6 +23,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    dotenvy::dotenv().ok();
     color_eyre::install()?;
 
     let args = Args::parse();
